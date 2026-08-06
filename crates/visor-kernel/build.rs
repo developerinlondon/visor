@@ -163,7 +163,13 @@ fn try_build_from_source(dest: &Path) -> bool {
          roughly 15 minutes on a cold cache. Set VISOR_KERNEL_URL to use a published \
          binary instead, or VISOR_KERNEL_NO_BUILD=1 to fail rather than compile."
     );
-    let status = std::process::Command::new(&script).arg(dest).status();
+    // The script takes an install DIRECTORY and writes <dir>/<kernel name>,
+    // which is exactly `dest` because both derive the name from the target
+    // arch. Handing it `dest` made it create a directory of that name.
+    let Some(install_dir) = dest.parent() else {
+        return false;
+    };
+    let status = std::process::Command::new(&script).arg(install_dir).status();
     match status {
         Ok(s) if s.success() && is_valid_kernel(dest) => true,
         Ok(s) => {
