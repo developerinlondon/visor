@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Compiling a guest kernel to typecheck the workspace would cost 15 minutes
+  # for nothing; the crate only needs a file that looks like a kernel.
+  VISOR_KERNEL_NO_BUILD: "1"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Stub the guest kernel
+        run: |
+          # visor-kernel's build script accepts any file above its size floor.
+          # This job builds and lints host code; booting a VM is not in scope.
+          head -c 2000000 /dev/zero > "${RUNNER_TEMP}/vmlinux-x86_64"
+          echo "VISOR_KERNEL_PATH=${RUNNER_TEMP}/vmlinux-x86_64" >> "$GITHUB_ENV"
+
+      - run: cargo fmt --all -- --check
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - run: cargo test --workspace
