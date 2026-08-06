@@ -1,0 +1,24 @@
+{
+    "name": "visor-site",
+    "private": true,
+    "type": "module",
+    "packageManager": "bun@1.3.4",
+    "scripts": {
+        "generate:build-info": "node ./scripts/generate-build-info.mjs",
+        "dev": "wrangler dev --port 3000",
+        "prebuild": "bun run generate:build-info",
+        "build": "wrangler deploy --dry-run --outdir dist",
+        "predeploy": "bun run generate:build-info",
+        "deploy": "wrangler deploy",
+        "preview": "wrangler dev --remote --port 3000",
+        "pretest": "bun run generate:build-info",
+        "test": "bun test"
+    },
+    "dependencies": {
+        "hono": "^4.12.3"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^4.20260228.1",
+        "wrangler": "^4.69.0"
+    }
+}

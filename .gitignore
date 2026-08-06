@@ -1,0 +1,28 @@
+/target
+/site/.wrangler
+/site/dist
+/site/node_modules
+/.moon/cache
+*.swp
+*.swo
+.DS_Store
+.env
+*.pem
+*.key
+
+# Kernel binaries (build artifacts — resolved by build.rs at compile time)
+vmlinux-*
+Image-*
+*.cer
+
+# Temp test artifacts
+/.tmp/
+
+# Machine-specific cargo config
+/.cargo/config.toml
+
+# Agent tooling
+.omc/
+
+# Local scratch and planning artifacts, not part of the published source.
+/.sisyphus/

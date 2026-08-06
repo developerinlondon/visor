@@ -1,0 +1,35 @@
+[package]
+name = "visor-docker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Docker Engine API compatibility layer for visor"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+axum = { workspace = true }
+bytes = { workspace = true }
+flate2 = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
+time = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+visor-build = { path = "../visor-build" }
+visor-types = { path = "../visor-types" }
+
+[dev-dependencies]
+tower = { workspace = true }

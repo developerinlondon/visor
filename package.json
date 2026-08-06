@@ -1,0 +1,9 @@
+{
+    "private": true,
+    "scripts": {
+        "site:install": "bun install --cwd site",
+        "site:build": "bun run --cwd site build",
+        "site:dev": "bun run --cwd site dev",
+        "site:deploy": "bun run --cwd site deploy"
+    }
+}

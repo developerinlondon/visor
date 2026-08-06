@@ -1,0 +1,32 @@
+[package]
+name = "visor-init"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Guest PID 1 for visor microVMs"
+
+[[bin]]
+name = "visor-init"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+flate2 = { workspace = true }
+nix = { workspace = true, features = ["poll", "reboot", "term"] }
+sha2 = { workspace = true }
+tar = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

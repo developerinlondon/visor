@@ -1,0 +1,14 @@
+$schema: "https://moonrepo.dev/schemas/workspace.json"
+
+projects:
+  site: "site"
+
+vcs:
+  manager: "git"
+  defaultBranch: "dev"
+  remoteCandidates:
+    - "origin"
+
+runner:
+  cacheLifetime: "7 days"
+  logRunningCommand: true

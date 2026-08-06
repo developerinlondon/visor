@@ -1,0 +1,21 @@
+[package]
+name = "visor-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Guest kernel download, validation, and caching for visor"
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[build-dependencies]
+reqwest = { workspace = true, features = ["blocking"] }

@@ -1,0 +1,20 @@
+$schema: "https://moonrepo.dev/schemas/project.json"
+
+id: site
+
+type: application
+language: typescript
+stack: frontend
+
+tags: [site, marketing, frontend]
+
+tasks:
+  build:
+    command: "bun run build"
+    outputs:
+      - "dist"
+  dev:
+    command: "bun run dev"
+    local: true
+  deploy:
+    command: "bun run deploy"

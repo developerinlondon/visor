@@ -1,0 +1,6 @@
+name = "visor-site"
+main = "src/index.tsx"
+compatibility_date = "2025-02-28"
+
+[vars]
+SITE_NAME = "Visor"

@@ -1,0 +1,31 @@
+services:
+  api:
+    image: busybox:latest
+    command:
+      - sh
+      - -lc
+      - |
+        mkdir -p /srv
+        printf 'api-ok\n' >/srv/index.html
+        httpd -f -p 8080 -h /srv
+    ports:
+      - "18080:8080"
+
+  probe:
+    image: busybox:latest
+    depends_on:
+      api:
+        condition: service_started
+    command:
+      - sh
+      - -lc
+      - |
+        for _attempt in 1 2 3 4 5; do
+          body="$$(wget -qO- http://api:8080 || true)"
+          if [ "$$body" = "api-ok" ]; then
+            break
+          fi
+          sleep 1
+        done
+        printf '%s\n' "$$body"
+        test "$$body" = "api-ok"

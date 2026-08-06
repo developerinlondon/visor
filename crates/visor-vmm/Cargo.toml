@@ -1,0 +1,45 @@
+[package]
+name = "visor-vmm"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Platform abstraction layer for visor — hypervisor, devices, networking, and sandboxing"
+
+[lints]
+workspace = true
+
+[dependencies]
+acpi_tables = { workspace = true }
+libc = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+applevisor = { workspace = true }
+nono = { workspace = true }
+vm-fdt = { workspace = true }
+vmnet = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+kvm-bindings = { workspace = true }
+kvm-ioctls = { workspace = true }
+vmm-sys-util = { workspace = true }
+nix = { workspace = true }
+seccompiler = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+nix = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+serial_test = { workspace = true }
+tempfile = { workspace = true }
