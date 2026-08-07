@@ -2663,3 +2663,64 @@ async fn events_route_exists_for_compose_filters() {
 
     assert_eq!(resp.status(), StatusCode::OK);
 }
+
+// ── build context extraction ────────────────────────────────────────
+
+/// The docker CLI heads every build context with a `./` entry. Writing that
+/// as a regular file fails with EISDIR, which broke every build from a stock
+/// client while the daemon's own test fixtures — tars without it — passed.
+#[test]
+fn extract_build_context_accepts_the_directory_entries_docker_sends() {
+    let mut builder = tar::Builder::new(Vec::new());
+
+    let mut root = tar::Header::new_gnu();
+    root.set_entry_type(tar::EntryType::Directory);
+    root.set_mode(0o755);
+    root.set_size(0);
+    builder.append_data(&mut root, "./", std::io::empty()).unwrap();
+
+    let mut sub = tar::Header::new_gnu();
+    sub.set_entry_type(tar::EntryType::Directory);
+    sub.set_mode(0o755);
+    sub.set_size(0);
+    builder.append_data(&mut sub, "src/", std::io::empty()).unwrap();
+
+    let dockerfile = b"FROM alpine:3.20\n";
+    let mut file = tar::Header::new_gnu();
+    file.set_mode(0o644);
+    file.set_size(dockerfile.len() as u64);
+    builder
+        .append_data(&mut file, "./Dockerfile", &dockerfile[..])
+        .unwrap();
+
+    let tar_bytes = builder.into_inner().unwrap();
+    let dir = extract_build_context(&tar_bytes).expect("a stock docker context must extract");
+
+    assert!(dir.path().join("Dockerfile").is_file());
+    assert!(dir.path().join("src").is_dir());
+}
+
+/// A context is attacker-controlled input; an entry must not write outside it.
+/// The name is written into the raw header because the tar builder refuses to
+/// produce `..` paths — which is exactly why a forged one must be tested.
+#[test]
+fn extract_build_context_refuses_an_entry_escaping_the_context() {
+    let payload = b"escaped\n";
+    let mut header = tar::Header::new_gnu();
+    header.set_mode(0o644);
+    header.set_size(payload.len() as u64);
+    header.set_entry_type(tar::EntryType::Regular);
+    {
+        let gnu = header.as_gnu_mut().expect("gnu header");
+        let name = b"../escaped.txt";
+        gnu.name[..name.len()].copy_from_slice(name);
+    }
+    header.set_cksum();
+
+    let mut builder = tar::Builder::new(Vec::new());
+    builder.append(&header, &payload[..]).unwrap();
+    let tar_bytes = builder.into_inner().unwrap();
+
+    let result = extract_build_context(&tar_bytes);
+    assert!(result.is_err(), "an escaping entry must be refused");
+}

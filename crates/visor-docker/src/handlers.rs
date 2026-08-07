@@ -2702,6 +2702,14 @@ fn build_context_tempdir() -> Result<tempfile::TempDir, String> {
 /// # Errors
 ///
 /// Returns an error if the tar archive is malformed or extraction fails.
+/// Unpacks a build-context tar.
+///
+/// Every entry goes through `unpack_in`, which is what makes directory and
+/// symlink entries work: the docker CLI puts a `./` entry at the head of every
+/// context it sends, and writing that as a regular file fails with EISDIR,
+/// which took down every build from a stock client. It also refuses an entry
+/// whose path escapes the destination, so a crafted context cannot write
+/// outside the tempdir.
 fn extract_build_context(data: &[u8]) -> Result<tempfile::TempDir, String> {
     let tmp = build_context_tempdir()?;
     let mut archive = tar::Archive::new(data);
@@ -2711,16 +2719,15 @@ fn extract_build_context(data: &[u8]) -> Result<tempfile::TempDir, String> {
             .path()
             .map_err(|e| format!("tar path: {e}"))?
             .into_owned();
-        let dest = tmp.path().join(&path);
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("mkdir {}: {e}", parent.display()))?;
+        if !entry
+            .unpack_in(tmp.path())
+            .map_err(|e| format!("unpack {}: {e}", path.display()))?
+        {
+            return Err(format!(
+                "build context entry {} resolves outside the context directory",
+                path.display()
+            ));
         }
-        let mut buf = Vec::new();
-        entry
-            .read_to_end(&mut buf)
-            .map_err(|e| format!("read: {e}"))?;
-        std::fs::write(&dest, &buf).map_err(|e| format!("write {}: {e}", dest.display()))?;
     }
     Ok(tmp)
 }
