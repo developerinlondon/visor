@@ -955,10 +955,32 @@ fn route_localnet_sysctl_path(interface: &str) -> String {
     format!("/proc/sys/net/ipv4/conf/{interface}/route_localnet")
 }
 
+/// Enable `route_localnet`, which only affects publishing guest ports on
+/// loopback.
+///
+/// A sandbox that mounts `/proc/sys` read-only — every unprivileged container
+/// — makes this unwritable, and refusing to boot the VM over it trades the
+/// whole machine for one optional feature. So a refusal is a warning and the
+/// caller continues; anything else is a real failure and propagates.
 fn set_route_localnet(interface: &str) -> Result<(), NetError> {
     let path = route_localnet_sysctl_path(interface);
-    std::fs::write(&path, "1")
-        .map_err(|error| NetError::Interface(format!("write {path}: {error}")))
+    match std::fs::write(&path, "1") {
+        Ok(()) => Ok(()),
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::ReadOnlyFilesystem | std::io::ErrorKind::PermissionDenied
+            ) =>
+        {
+            tracing::warn!(
+                path = %path,
+                %error,
+                "cannot enable route_localnet; publishing guest ports on loopback will not work"
+            );
+            Ok(())
+        }
+        Err(error) => Err(NetError::Interface(format!("write {path}: {error}"))),
+    }
 }
 
 fn nix_err_to_io(error: nix::errno::Errno) -> std::io::Error {
