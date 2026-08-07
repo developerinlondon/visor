@@ -519,7 +519,7 @@ async fn boot_worker_vm<W: tokio::io::AsyncWrite + Unpin>(
         let mem = visor_vmm::memory::GuestMemory::from_shared_fd(
             shm_region.fd(),
             memory_size,
-            visor_vmm::boot::aarch64::DRAM_MEM_START,
+            visor_vmm::boot::GUEST_RAM_START,
         )
         .context("map shared memory as guest RAM")?;
         tracing::info!(

@@ -17,6 +17,17 @@ pub mod x86_64;
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 
+/// Guest physical address where usable RAM begins.
+///
+/// x86_64 maps guest RAM from zero; aarch64 places it above the device
+/// region. Exposed arch-neutrally so callers mapping guest memory do not
+/// have to reach into an arch module that does not exist on the other target.
+#[cfg(target_arch = "x86_64")]
+pub const GUEST_RAM_START: u64 = 0;
+
+#[cfg(target_arch = "aarch64")]
+pub const GUEST_RAM_START: u64 = aarch64::DRAM_MEM_START;
+
 // ── Memory Layout Constants (x86_64) ────────────────────────────────────────
 //
 // These match the Linux boot protocol and Firecracker's layout. All addresses
