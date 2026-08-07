@@ -139,10 +139,14 @@ fn is_default_mode(mode: &str) -> bool {
     mode == "run"
 }
 
+// serde's skip_serializing_if takes a fn(&T) -> bool, so the reference is
+// the external contract rather than a choice clippy can improve on.
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde skip_serializing_if signature")]
 const fn is_false(value: &bool) -> bool {
     !*value
 }
 
+#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde skip_serializing_if signature")]
 const fn is_default_network_default_route(value: &bool) -> bool {
     *value
 }

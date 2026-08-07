@@ -35,10 +35,10 @@ jobs:
           head -c 2000000 /dev/zero > "${RUNNER_TEMP}/vmlinux-x86_64"
           echo "VISOR_KERNEL_PATH=${RUNNER_TEMP}/vmlinux-x86_64" >> "$GITHUB_ENV"
 
-      # The declared gates are clippy, tests and dprint; rustfmt is not one of
-      # them and the tree is not rustfmt-clean, so checking it here would fail
-      # every run for a standard this project never adopted.
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      # Exactly the gates AGENTS.md declares. Neither rustfmt nor
+      # --all-targets is among them, and the tree satisfies neither, so
+      # adding either would fail every run against a standard never adopted.
+      - run: cargo clippy --workspace -- -D warnings
 
       - run: cargo test --workspace
 
