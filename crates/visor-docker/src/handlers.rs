@@ -2617,7 +2617,12 @@ pub async fn build_image(
                 let messages = build_output_to_messages(&output, params.t.as_deref(), quiet);
                 build_stream_response(messages)
             }
-            Err(e) => build_error_response(&format!("build failed: {e}")),
+            Err(e) => {
+                // Logged as well as returned: a build that fails inside the
+                // guest leaves nothing else behind to diagnose it from.
+                tracing::error!(error = ?e, "build failed");
+                build_error_response(&format!("build failed: {e:#}"))
+            }
         }
     } else {
         // Fallback: generate fake progress messages
@@ -2906,6 +2911,11 @@ fn build_stream_response(messages: Vec<String>) -> Response {
 /// Builds a Docker error response for build failures.
 fn build_error_response(message: &str) -> Response {
     let body = serde_json::json!({
+        // Docker's HTTP error convention is `message`; without it the CLI
+        // reports "provided no error-message" and the reason is lost. The
+        // `error`/`errorDetail` pair is the in-stream shape, kept alongside
+        // so clients reading either one still get the text.
+        "message": message,
         "error": message,
         "errorDetail": { "message": message }
     });
