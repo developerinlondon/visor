@@ -11,11 +11,16 @@ FROM rust:1-bookworm AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang cmake musl-tools \
     gcc make bc flex bison libelf-dev libssl-dev git \
-    && rm -rf /var/lib/apt/lists/* \
-    && rustup target add x86_64-unknown-linux-musl
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 COPY . .
+
+# After the source, deliberately: rust-toolchain.toml pins the channel, and
+# rustup resolves it only from inside the tree. Adding the target earlier
+# attaches it to the base image's toolchain, and the guest init build then
+# fails on a missing core for musl.
+RUN rustup target add x86_64-unknown-linux-musl
 
 # VISOR_KERNEL_URL points at a published vmlinux-x86_64 to skip the ~15 minute
 # compile; unset, the build script fetches public kernel sources and builds.
