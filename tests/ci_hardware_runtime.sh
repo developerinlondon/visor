@@ -2,6 +2,13 @@
 set -euo pipefail
 
 workflow="${CI_HARDWARE_WORKFLOW:-.github/workflows/ci.yml}"
+check_job="$({
+    awk '
+        /^  check:$/ { in_check = 1 }
+        in_check && /^  [A-Za-z0-9_-]+:$/ && $0 != "  check:" { exit }
+        in_check && $0 !~ /^[[:space:]]*#/ { print }
+    ' "$workflow"
+})"
 hardware_job="$({
     awk '
         /^  hardware:$/ { in_hardware = 1 }
@@ -18,12 +25,12 @@ require_hardware_text() {
     fi
 }
 
-if ! grep -Fq "bash tests/ci_hardware_runtime.sh" "$workflow"; then
+if ! grep -Eq '^[[:space:]]*bash tests/ci_hardware_runtime_test[.]sh[[:space:]]*$' <<<"$check_job"; then
     echo "hosted CI must enforce the hardware runtime contract" >&2
     exit 1
 fi
 
-if ! grep -Fq 'cargo test -p visor-vmm net::linux::tests::create_interface_requires_root' "$workflow"; then
+if ! grep -Eq '^[[:space:]]*cargo test -p visor-vmm net::linux::tests::create_interface_requires_root[[:space:]]*$' <<<"$check_job"; then
     echo "hosted CI must exercise the non-root TAP contract" >&2
     exit 1
 fi

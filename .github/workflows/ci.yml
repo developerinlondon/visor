@@ -28,7 +28,7 @@ jobs:
       - name: Verify hardware contracts
         run: |
           bash tests/ci_hardware_trust_test.sh
-          bash tests/ci_hardware_runtime.sh
+          bash tests/ci_hardware_runtime_test.sh
 
       - uses: dtolnay/rust-toolchain@stable
         with:
