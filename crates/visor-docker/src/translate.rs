@@ -404,8 +404,9 @@ pub fn vm_info_to_inspect_with_labels<S: std::hash::BuildHasher>(
 
 /// Converts a visor VM and its creation config into a Docker inspect response.
 ///
-/// Running VMs expose their deterministic guest address under every requested
-/// Docker network. Containers without a named network retain Docker's default
+/// Every VM exposes its requested Docker network membership. Running VMs also
+/// expose their deterministic guest addresses; non-running VMs retain empty
+/// address fields. Containers without a named network use Docker's default
 /// `bridge` entry.
 #[must_use]
 pub fn vm_info_to_inspect_with_config(
@@ -413,27 +414,29 @@ pub fn vm_info_to_inspect_with_config(
     config: &VmConfig,
 ) -> ContainerInspectResponse {
     let mut inspect = vm_info_to_inspect_with_labels(info, &config.labels);
-    let Some(cid) = info.cid.filter(|_| info.state == VmState::Running) else {
-        return inspect;
-    };
-
     let network_names = if config.networks.is_empty() {
         vec!["bridge".to_owned()]
     } else {
         config.networks.clone()
     };
+    let running_cid = info.cid.filter(|_| info.state == VmState::Running);
     inspect.network_settings.networks = network_names
         .into_iter()
         .map(|network_name| {
-            let link = if network_name == "bridge" {
-                visor_types::GuestNetworkLink::for_cid(cid)
+            let (ip_address, gateway) = if let Some(cid) = running_cid {
+                let link = if network_name == "bridge" {
+                    visor_types::GuestNetworkLink::for_cid(cid)
+                } else {
+                    visor_types::GuestNetworkLink::for_named_network(&network_name, cid)
+                };
+                (link.guest_ip.to_string(), link.gateway_ip.to_string())
             } else {
-                visor_types::GuestNetworkLink::for_named_network(&network_name, cid)
+                (String::new(), String::new())
             };
             let entry = NetworkEntry {
                 network_i_d: network_name.clone(),
-                ip_address: link.guest_ip.to_string(),
-                gateway: link.gateway_ip.to_string(),
+                ip_address,
+                gateway,
             };
             (network_name, entry)
         })

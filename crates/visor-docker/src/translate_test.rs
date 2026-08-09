@@ -442,6 +442,31 @@ fn vm_info_to_inspect_stopped() {
 }
 
 #[test]
+fn vm_info_to_inspect_stopped_preserves_named_network_membership() {
+    let vm = VmInfo::new(
+        "vm-stopped-network".to_owned(),
+        "alpine".to_owned(),
+        VmState::Stopped,
+        String::new(),
+        128,
+        1,
+    );
+    let mut config = VmConfig::new("alpine");
+    config.networks = vec!["sandbox-network".to_owned()];
+
+    let resp = vm_info_to_inspect_with_config(&vm, &config);
+    let network = resp
+        .network_settings
+        .networks
+        .get("sandbox-network")
+        .expect("stopped container should retain named-network membership");
+
+    assert_eq!(network.network_i_d, "sandbox-network");
+    assert!(network.ip_address.is_empty());
+    assert!(network.gateway.is_empty());
+}
+
+#[test]
 fn vm_info_to_inspect_failed() {
     let vm = VmInfo::new(
         "vm-failed".to_owned(),
