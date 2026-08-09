@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-workflow=.github/workflows/ci.yml
+workflow="${CI_HARDWARE_WORKFLOW:-.github/workflows/ci.yml}"
 hardware_job="$(
     awk '
         /^  hardware:$/ { in_hardware = 1 }
@@ -9,6 +9,7 @@ hardware_job="$(
         in_hardware { print }
     ' "$workflow"
 )"
+hardware_job_code="$(sed '/^[[:space:]]*#/d' <<<"$hardware_job")"
 workflow_permissions="$(
     awk '
         /^permissions:$/ { in_permissions = 1; next }
@@ -24,7 +25,7 @@ fi
 
 require_hardware_text() {
     local expected=$1
-    if ! grep -Fq "$expected" <<<"$hardware_job"; then
+    if ! grep -Fq "$expected" <<<"$hardware_job_code"; then
         echo "hardware job is missing trust control: $expected" >&2
         exit 1
     fi
@@ -39,8 +40,17 @@ require_hardware_text "(github.event_name == 'push' && github.ref == 'refs/heads
 require_hardware_text "github.event_name == 'workflow_dispatch' ||"
 require_hardware_text "(github.event_name == 'pull_request' &&"
 require_hardware_text "github.event.pull_request.head.repo.full_name == github.repository"
-require_hardware_text "needs: check"
 require_hardware_text "runs-on: [self-hosted, linux, x64, visor-kvm]"
+
+if ! grep -Eq '^    needs: check([[:space:]]*#.*)?$' <<<"$hardware_job"; then
+    echo "hardware job must depend on the hosted check job" >&2
+    exit 1
+fi
+
+if ! grep -Eq '^    if: >-$' <<<"$hardware_job_code"; then
+    echo "hardware job event allowlist must be an active job condition" >&2
+    exit 1
+fi
 
 if grep -Fq "pull_request_target:" "$workflow"; then
     echo "hardware CI must not use pull_request_target" >&2
