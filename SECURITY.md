@@ -43,6 +43,21 @@ The following are in scope:
 - VM isolation boundary
 - Host-guest communication (vsock)
 
+## Self-Hosted CI Trust Boundary
+
+Visor's KVM tests use a privileged, repository-scoped self-hosted runner. The hardware job accepts
+only pushes to `main`, manual dispatches by repository collaborators, and pull requests whose head
+repository is Visor itself. Pull requests from forks run the hosted checks but skip the hardware
+job.
+
+The hardware job inherits a read-only `GITHUB_TOKEN`, pins every action to an immutable commit, and
+is guarded by `tests/ci_hardware_trust.sh`. That contract runs on a GitHub-hosted runner and rejects
+mutable action references, `pull_request_target`, job-level permission overrides, or removal of the
+same-repository check.
+
+Do not register the KVM listener outside this repository or weaken these workflow controls. A
+self-hosted runner is not an isolation boundary for untrusted pull-request code.
+
 ## Out of Scope
 
 - Vulnerabilities in guest OS or user-provided container images
