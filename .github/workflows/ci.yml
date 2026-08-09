@@ -63,7 +63,13 @@ jobs:
           --skip devices::vsock_muxer::tests::connection_limit_enforced
 
       - name: Test VMM host utilities
-        run: cargo test -p visor-vmm test_temp_root
+        run: |
+          if [[ "$(id -u)" == "0" ]]; then
+            echo "VMM host utility tests require a non-root runner" >&2
+            exit 1
+          fi
+          cargo test -p visor-vmm test_temp_root
+          cargo test -p visor-vmm net::linux::tests::create_interface_requires_root
 
       - name: Test documentation
         run: cargo test --workspace --doc

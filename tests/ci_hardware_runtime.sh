@@ -23,6 +23,11 @@ if ! grep -Fq "bash tests/ci_hardware_runtime.sh" "$workflow"; then
     exit 1
 fi
 
+if ! grep -Fq 'cargo test -p visor-vmm net::linux::tests::create_interface_requires_root' "$workflow"; then
+    echo "hosted CI must exercise the non-root TAP contract" >&2
+    exit 1
+fi
+
 require_hardware_text 'os.open(path, os.O_RDWR | os.O_CLOEXEC)'
 require_hardware_text "short_root=\"/tmp/visor-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}\""
 require_hardware_text "VISOR_TEST_TEMP_ROOT=\$short_root/tests"
