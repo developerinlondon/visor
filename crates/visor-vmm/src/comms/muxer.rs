@@ -19,12 +19,22 @@ impl MuxerCommsBackend {
     /// Default socket directory for guest communication.
     pub const DEFAULT_SOCKET_DIR: &str = "/var/run/visor/vsock";
 
-    /// Create a new backend with the default socket directory.
+    /// Environment variable that overrides the guest communication socket
+    /// directory.
+    pub const SOCKET_DIR_ENV: &str = "VISOR_VSOCK_SOCKET_DIR";
+
+    /// Create a new backend with the configured socket directory.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            socket_dir: PathBuf::from(Self::DEFAULT_SOCKET_DIR),
+            socket_dir: Self::configured_socket_dir(),
         }
+    }
+
+    /// Resolve the socket directory from the runtime override or the default.
+    #[must_use]
+    pub fn configured_socket_dir() -> PathBuf {
+        configured_socket_dir_from(std::env::var_os(Self::SOCKET_DIR_ENV))
     }
 
     /// Create a new backend with a custom socket directory.
@@ -52,6 +62,13 @@ impl MuxerCommsBackend {
             .join(cid.to_string())
             .join(format!("{port}.sock"))
     }
+}
+
+fn configured_socket_dir_from(override_path: Option<std::ffi::OsString>) -> PathBuf {
+    override_path.filter(|path| !path.is_empty()).map_or_else(
+        || PathBuf::from(MuxerCommsBackend::DEFAULT_SOCKET_DIR),
+        PathBuf::from,
+    )
 }
 
 impl Default for MuxerCommsBackend {
