@@ -10,6 +10,13 @@ hardware_job="$(
     ' "$workflow"
 )"
 hardware_job_code="$(sed '/^[[:space:]]*#/d' <<<"$hardware_job")"
+hardware_if="$(
+    awk '
+        /^    if: >-$/ { in_if = 1; next }
+        in_if && /^    [A-Za-z0-9_-]+:/ { exit }
+        in_if { print }
+    ' <<<"$hardware_job_code"
+)"
 workflow_permissions="$(
     awk '
         /^permissions:$/ { in_permissions = 1; next }
@@ -36,10 +43,6 @@ if [[ "$workflow_permissions" != "  contents: read" ]]; then
     exit 1
 fi
 
-require_hardware_text "(github.event_name == 'push' && github.ref == 'refs/heads/main') ||"
-require_hardware_text "github.event_name == 'workflow_dispatch' ||"
-require_hardware_text "(github.event_name == 'pull_request' &&"
-require_hardware_text "github.event.pull_request.head.repo.full_name == github.repository"
 require_hardware_text "runs-on: [self-hosted, linux, x64, visor-kvm]"
 
 if ! grep -Eq '^    needs: check([[:space:]]*#.*)?$' <<<"$hardware_job"; then
@@ -49,6 +52,13 @@ fi
 
 if ! grep -Eq '^    if: >-$' <<<"$hardware_job_code"; then
     echo "hardware job event allowlist must be an active job condition" >&2
+    exit 1
+fi
+
+hardware_if_normalized="$(tr -d '[:space:]' <<<"$hardware_if")"
+expected_hardware_if="(github.event_name=='push'&&github.ref=='refs/heads/main')||github.event_name=='workflow_dispatch'||(github.event_name=='pull_request'&&github.event.pull_request.head.repo.full_name==github.repository)"
+if [[ "$hardware_if_normalized" != "$expected_hardware_if" ]]; then
+    echo "hardware job condition must be the exact trusted-event allowlist" >&2
     exit 1
 fi
 
