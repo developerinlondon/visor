@@ -23,3 +23,7 @@ fn workspace_test_temp_root() -> PathBuf {
         .join(".tmp")
         .join("visor-vmm-tests")
 }
+
+#[cfg(test)]
+#[path = "testutil_test.rs"]
+mod tests;
