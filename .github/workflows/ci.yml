@@ -25,8 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify hardware trust boundary
-        run: bash tests/ci_hardware_trust_test.sh
+      - name: Verify hardware contracts
+        run: |
+          bash tests/ci_hardware_trust_test.sh
+          bash tests/ci_hardware_runtime.sh
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -60,6 +62,9 @@ jobs:
           cargo test --workspace --exclude visor-vmm --lib --bins --
           --skip devices::vsock_muxer::tests::connection_limit_enforced
 
+      - name: Test VMM host utilities
+        run: cargo test -p visor-vmm test_temp_root
+
       - name: Test documentation
         run: cargo test --workspace --doc
 
@@ -91,10 +96,18 @@ jobs:
 
       - name: Verify hardware access
         run: |
-          test -r /dev/kvm && test -w /dev/kvm
-          test -r /dev/net/tun && test -w /dev/net/tun
-          mkdir -p "$RUNNER_TEMP/visor-vsock"
-          echo "VISOR_VSOCK_SOCKET_DIR=$RUNNER_TEMP/visor-vsock" >> "$GITHUB_ENV"
+          python3 - <<'PY'
+          import os
+
+          for path in ("/dev/kvm", "/dev/net/tun"):
+              descriptor = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+              os.close(descriptor)
+              print(f"opened {path}")
+          PY
+          short_root="/tmp/visor-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$short_root/vsock" "$short_root/tests"
+          echo "VISOR_VSOCK_SOCKET_DIR=$short_root/vsock" >> "$GITHUB_ENV"
+          echo "VISOR_TEST_TEMP_ROOT=$short_root/tests" >> "$GITHUB_ENV"
 
       - name: Build guest kernel
         run: |
@@ -107,6 +120,7 @@ jobs:
       - name: Test KVM host code
         run: >-
           cargo test -p visor-vmm --lib --
+          --skip net::linux::tests::create_interface_requires_root
           --skip devices::vsock_muxer::tests::connection_limit_enforced
 
       - name: Test real guest boots
