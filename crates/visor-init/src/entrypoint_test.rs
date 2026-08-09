@@ -31,6 +31,17 @@ fn exec_params_with_empty_env_is_valid() {
 }
 
 #[test]
+fn workload_command_wraps_a_limited_command_with_the_guest_launcher() {
+    let command = workload_command(&["/bin/echo".to_owned(), "hello".to_owned()], true).unwrap();
+
+    assert_eq!(command.get_program(), "/sbin/visor-init");
+    assert_eq!(
+        command.get_args().collect::<Vec<_>>(),
+        ["--visor-workload", "/bin/echo", "hello"]
+    );
+}
+
+#[test]
 fn command_env_injects_default_path_when_missing() {
     let env = build_command_env(&["FOO=bar".to_owned()]);
 

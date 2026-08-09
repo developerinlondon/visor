@@ -16,6 +16,12 @@ use crate::config::RunConfig;
 /// Default PATH used for guest command execution when none is provided.
 const DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
+/// Internal argument used to enter the workload cgroup before executing a
+/// user command.
+pub const WORKLOAD_LAUNCHER_ARG: &str = "--visor-workload";
+
+const GUEST_INIT_PATH: &str = "/sbin/visor-init";
+
 /// Parameters for spawning the user's command.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -48,6 +54,33 @@ impl ExecParams {
     }
 }
 
+/// Build a command that enters the workload cgroup when a process limit is
+/// configured.
+///
+/// The wrapper is the trusted guest init binary. It joins the limited cgroup
+/// and then replaces itself with the requested command, so no management
+/// process consumes the workload allowance.
+///
+/// # Errors
+///
+/// Returns an error when the command vector is empty.
+pub fn workload_command(
+    cmd: &[String],
+    process_limit_enabled: bool,
+) -> anyhow::Result<std::process::Command> {
+    anyhow::ensure!(!cmd.is_empty(), "command must not be empty");
+
+    if process_limit_enabled {
+        let mut command = std::process::Command::new(GUEST_INIT_PATH);
+        command.arg(WORKLOAD_LAUNCHER_ARG).args(cmd);
+        Ok(command)
+    } else {
+        let mut command = std::process::Command::new(&cmd[0]);
+        command.args(&cmd[1..]);
+        Ok(command)
+    }
+}
+
 /// Spawns the user's command as a child process.
 ///
 /// Uses `std::process::Command` to create the child with the specified
@@ -58,10 +91,17 @@ impl ExecParams {
 /// Returns an error if the command vector is empty, the binary cannot be
 /// found, or the process fails to start.
 pub fn spawn_child(params: &ExecParams) -> anyhow::Result<Pid> {
-    anyhow::ensure!(!params.cmd.is_empty(), "command must not be empty");
+    spawn_workload(params, false)
+}
 
-    let mut command = std::process::Command::new(&params.cmd[0]);
-    command.args(&params.cmd[1..]);
+/// Spawn the user's command, optionally through the limited workload cgroup.
+///
+/// # Errors
+///
+/// Returns an error if the command vector is empty, the working directory
+/// cannot be created, or the process fails to start.
+pub fn spawn_workload(params: &ExecParams, process_limit_enabled: bool) -> anyhow::Result<Pid> {
+    let mut command = workload_command(&params.cmd, process_limit_enabled)?;
 
     command.env_clear();
     command.envs(build_command_env(&params.env));

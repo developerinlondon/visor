@@ -230,9 +230,14 @@ fn handle_exec_stream_connection(
         .filter_map(|entry| entry.split_once('='))
         .collect();
 
-    let mut command = std::process::Command::new(&params.cmd[0]);
+    let process_limit_enabled = state
+        .lock()
+        .map_err(|e| anyhow::anyhow!("mutex poisoned: {e}"))?
+        .config
+        .process_limit
+        .is_some();
+    let mut command = crate::entrypoint::workload_command(&params.cmd, process_limit_enabled)?;
     command
-        .args(&params.cmd[1..])
         .envs(parsed_env)
         .current_dir(&params.workdir)
         .stdin(std::process::Stdio::piped())
@@ -343,9 +348,14 @@ fn handle_exec_stream_tty_connection(
         .try_clone()
         .context("failed to clone PTY slave for stdout")?;
 
-    let mut command = std::process::Command::new(&params.cmd[0]);
+    let process_limit_enabled = state
+        .lock()
+        .map_err(|e| anyhow::anyhow!("mutex poisoned: {e}"))?
+        .config
+        .process_limit
+        .is_some();
+    let mut command = crate::entrypoint::workload_command(&params.cmd, process_limit_enabled)?;
     command
-        .args(&params.cmd[1..])
         .envs(parsed_env)
         .current_dir(&params.workdir)
         .stdin(std::process::Stdio::from(stdin_slave))
@@ -581,11 +591,13 @@ pub fn handle_method(
 ) -> JsonRpcResponse {
     match method {
         AgentMethod::Ping => agent::ping_response(id),
-        AgentMethod::Exec(params) => match execute_command(&params) {
-            Ok(result) => agent::exec_response(id.clone(), &result)
-                .unwrap_or_else(|e| JsonRpcResponse::error(id, INTERNAL_ERROR, format!("{e}"))),
-            Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, format!("{e}")),
-        },
+        AgentMethod::Exec(params) => {
+            match execute_command(&params, state.config.process_limit.is_some()) {
+                Ok(result) => agent::exec_response(id.clone(), &result)
+                    .unwrap_or_else(|e| JsonRpcResponse::error(id, INTERNAL_ERROR, format!("{e}"))),
+                Err(e) => JsonRpcResponse::error(id, INTERNAL_ERROR, format!("{e}")),
+            }
+        }
         AgentMethod::ExecStream(_) => JsonRpcResponse::error(
             id,
             INTERNAL_ERROR,
@@ -642,15 +654,17 @@ pub fn handle_method(
 /// # Errors
 ///
 /// Returns an error if the command cannot be spawned.
-fn execute_command(params: &agent::ExecParams) -> anyhow::Result<ExecResult> {
+fn execute_command(
+    params: &agent::ExecParams,
+    process_limit_enabled: bool,
+) -> anyhow::Result<ExecResult> {
     let parsed_env: Vec<(&str, &str)> = params
         .env
         .iter()
         .filter_map(|e| e.split_once('='))
         .collect();
 
-    let output = std::process::Command::new(&params.cmd[0])
-        .args(&params.cmd[1..])
+    let output = crate::entrypoint::workload_command(&params.cmd, process_limit_enabled)?
         .envs(parsed_env)
         .current_dir(&params.workdir)
         .stdout(std::process::Stdio::piped())

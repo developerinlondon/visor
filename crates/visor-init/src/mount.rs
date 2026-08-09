@@ -150,11 +150,11 @@ pub fn mount_initial_filesystems() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Constrain all guest workload processes through the cgroup v2 PIDs controller.
+/// Prepare a cgroup v2 PIDs limit for guest workload processes.
 ///
-/// The guest init process moves itself into a child cgroup before enabling the
-/// controller on the root. Every command it subsequently launches inherits the
-/// limit.
+/// Guest init remains in the root cgroup so its management processes do not
+/// consume the workload allowance. Each workload launcher joins the child
+/// cgroup immediately before replacing itself with the requested command.
 ///
 /// # Errors
 ///
@@ -169,12 +169,28 @@ fn configure_process_limit_at(root: &Path, limit: u64) -> anyhow::Result<()> {
 
     let workload = root.join(WORKLOAD_CGROUP);
     fs::create_dir_all(&workload).context("create guest workload cgroup")?;
-    fs::write(workload.join("cgroup.procs"), "0")
-        .context("move guest init into workload cgroup")?;
     fs::write(root.join("cgroup.subtree_control"), "+pids")
         .context("enable guest pids controller")?;
     fs::write(workload.join("pids.max"), limit.to_string()).context("set guest process limit")?;
     Ok(())
+}
+
+/// Move the current process into the limited workload cgroup.
+///
+/// This is called only by the trusted workload launcher immediately before it
+/// replaces itself with the requested command.
+///
+/// # Errors
+///
+/// Returns an error when the workload cgroup is unavailable or has reached its
+/// process limit.
+pub fn join_workload_cgroup() -> anyhow::Result<()> {
+    join_workload_cgroup_at(Path::new(CGROUP_ROOT))
+}
+
+fn join_workload_cgroup_at(root: &Path) -> anyhow::Result<()> {
+    fs::write(root.join(WORKLOAD_CGROUP).join("cgroup.procs"), "0")
+        .context("join guest workload cgroup")
 }
 
 /// Validate a new root path for `pivot_root`.
