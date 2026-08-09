@@ -39,6 +39,7 @@ require_hardware_text "(github.event_name == 'push' && github.ref == 'refs/heads
 require_hardware_text "github.event_name == 'workflow_dispatch' ||"
 require_hardware_text "(github.event_name == 'pull_request' &&"
 require_hardware_text "github.event.pull_request.head.repo.full_name == github.repository"
+require_hardware_text "needs: check"
 require_hardware_text "runs-on: [self-hosted, linux, x64, visor-kvm]"
 
 if grep -Fq "pull_request_target:" "$workflow"; then
