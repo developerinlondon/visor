@@ -5,6 +5,8 @@ fn vm_config_defaults() {
     let config: VmConfig = serde_json::from_str(r#"{"image": "alpine:latest"}"#).unwrap();
     assert_eq!(config.memory_mib, 512);
     assert_eq!(config.vcpus, 1);
+    assert!(config.rootfs_extra_size_mib.is_none());
+    assert!(config.process_limit.is_none());
     assert!(config.entrypoint.is_empty());
     assert!(config.cmd.is_empty());
     assert!(config.env.is_empty());

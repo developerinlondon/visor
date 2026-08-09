@@ -105,6 +105,9 @@ const ESSENTIAL_DEVICES: &[(&str, u64, u64, u32)] = &[
     ("/dev/urandom", 1, 9, 0o444),
 ];
 
+const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+const WORKLOAD_CGROUP: &str = "visor";
+
 /// Mount all initial filesystems required for guest boot.
 ///
 /// Iterates [`INIT_MOUNTS`], creates each target directory if it does not
@@ -144,6 +147,33 @@ pub fn mount_initial_filesystems() -> anyhow::Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+/// Constrain all guest workload processes through the cgroup v2 PIDs controller.
+///
+/// The guest init process moves itself into a child cgroup before enabling the
+/// controller on the root. Every command it subsequently launches inherits the
+/// limit.
+///
+/// # Errors
+///
+/// Returns an error when the limit is zero or the guest cgroup hierarchy cannot
+/// be configured.
+pub fn configure_process_limit(limit: u64) -> anyhow::Result<()> {
+    configure_process_limit_at(Path::new(CGROUP_ROOT), limit)
+}
+
+fn configure_process_limit_at(root: &Path, limit: u64) -> anyhow::Result<()> {
+    anyhow::ensure!(limit > 0, "process limit must be greater than zero");
+
+    let workload = root.join(WORKLOAD_CGROUP);
+    fs::create_dir_all(&workload).context("create guest workload cgroup")?;
+    fs::write(workload.join("cgroup.procs"), "0")
+        .context("move guest init into workload cgroup")?;
+    fs::write(root.join("cgroup.subtree_control"), "+pids")
+        .context("enable guest pids controller")?;
+    fs::write(workload.join("pids.max"), limit.to_string()).context("set guest process limit")?;
     Ok(())
 }
 

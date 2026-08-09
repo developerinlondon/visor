@@ -192,3 +192,34 @@ fn cgroup2_mount_exists_for_nested_runtimes() {
     assert!(entry.flags.contains(MsFlags::MS_NODEV));
     assert!(entry.flags.contains(MsFlags::MS_NOEXEC));
 }
+
+#[test]
+fn process_limit_moves_init_into_a_limited_cgroup() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("cgroup.subtree_control"), "").unwrap();
+
+    configure_process_limit_at(root.path(), 256).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("cgroup.subtree_control")).unwrap(),
+        "+pids"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("visor/cgroup.procs")).unwrap(),
+        "0"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("visor/pids.max")).unwrap(),
+        "256"
+    );
+}
+
+#[test]
+fn process_limit_rejects_zero_before_creating_a_cgroup() {
+    let root = tempfile::tempdir().unwrap();
+
+    let error = configure_process_limit_at(root.path(), 0).unwrap_err();
+
+    assert!(error.to_string().contains("greater than zero"));
+    assert!(!root.path().join("visor").exists());
+}

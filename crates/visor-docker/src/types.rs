@@ -124,6 +124,10 @@ pub struct HostConfig {
     pub memory: Option<u64>,
     /// CPU count.
     pub nano_cpus: Option<u64>,
+    /// Maximum number of processes and threads.
+    pub pids_limit: Option<i64>,
+    /// Storage-driver options such as writable-layer `size`.
+    pub storage_opt: Option<HashMap<String, String>>,
     /// Restart policy.
     pub restart_policy: Option<RestartPolicy>,
     /// Network mode (e.g. `"bridge"`, `"host"`).

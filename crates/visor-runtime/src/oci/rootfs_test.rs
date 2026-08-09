@@ -95,6 +95,21 @@ fn calculate_dir_size_skips_symlinks() {
     assert_eq!(size, 100);
 }
 
+#[test]
+fn calculate_rootfs_size_rejects_extra_size_above_limit() {
+    let error =
+        calculate_rootfs_size_bytes(0, visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB + 1).unwrap_err();
+
+    assert!(error.to_string().contains("exceeds maximum"));
+}
+
+#[test]
+fn calculate_rootfs_size_rejects_byte_overflow() {
+    let error = calculate_rootfs_size_bytes(u64::MAX, 1).unwrap_err();
+
+    assert!(error.to_string().contains("overflows"));
+}
+
 // ─── Build from empty directory ─────────────────────────────────
 
 #[test]

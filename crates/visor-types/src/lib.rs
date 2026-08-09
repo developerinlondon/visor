@@ -38,6 +38,9 @@ fn default_protocol() -> String {
 /// Default first guest CID assigned by the runtime.
 pub const FIRST_GUEST_CID: u32 = 3;
 
+/// Maximum writable rootfs headroom accepted for one VM, in MiB (1 TiB).
+pub const MAX_ROOTFS_EXTRA_SIZE_MIB: u64 = 1024 * 1024;
+
 // ── Shared types ───────────────────────────────────────────────────
 
 /// How much hardware virtualization support the guest should see.
@@ -69,7 +72,7 @@ pub enum GuestVirtualizationMode {
 /// assert_eq!(config.memory_mib, 512);
 /// assert_eq!(config.vcpus, 1);
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct VmConfig {
     /// OCI image reference (e.g. `"alpine:latest"`).
@@ -91,6 +94,12 @@ pub struct VmConfig {
     /// Number of virtual CPUs (default: 1).
     #[serde(default = "default_vcpus")]
     pub vcpus: u32,
+    /// Maximum number of processes and threads allowed inside the guest workload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_limit: Option<u64>,
+    /// Writable space to add beyond the OCI image content, in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rootfs_extra_size_mib: Option<u64>,
     /// Optional human-readable name.
     pub name: Option<String>,
     /// Arbitrary metadata labels associated with the VM.
@@ -147,6 +156,8 @@ impl VmConfig {
             working_dir: None,
             memory_mib: default_memory(),
             vcpus: default_vcpus(),
+            process_limit: None,
+            rootfs_extra_size_mib: None,
             name: None,
             labels: std::collections::HashMap::new(),
             ports: Vec::new(),
@@ -207,7 +218,7 @@ impl ServicePort {
 }
 
 /// Maps a host port to a guest port with a protocol.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PortMapping {
     /// Port on the host.
@@ -242,7 +253,7 @@ impl PortMapping {
 }
 
 /// Mounts a host directory into the guest VM.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct VolumeMount {
     /// Absolute path on the host.

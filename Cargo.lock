@@ -4547,7 +4547,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "visor-build"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4571,7 +4571,7 @@ dependencies = [
 
 [[package]]
 name = "visor-docker"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4584,6 +4584,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tempfile",
+ "thiserror 2.0.18",
  "time",
  "tokio",
  "tokio-stream",
@@ -4596,7 +4597,7 @@ dependencies = [
 
 [[package]]
 name = "visor-init"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -4612,7 +4613,7 @@ dependencies = [
 
 [[package]]
 name = "visor-integration-tests"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4637,7 +4638,7 @@ dependencies = [
 
 [[package]]
 name = "visor-kernel"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "reqwest 0.13.2",
  "tempfile",
@@ -4646,7 +4647,7 @@ dependencies = [
 
 [[package]]
 name = "visor-runtime"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4700,7 +4701,7 @@ dependencies = [
 
 [[package]]
 name = "visor-types"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4712,7 +4713,7 @@ dependencies = [
 
 [[package]]
 name = "visor-vmm"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "acpi_tables",
  "applevisor",

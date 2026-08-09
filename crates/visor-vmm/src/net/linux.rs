@@ -11,6 +11,7 @@ use std::fmt;
 use std::net::Ipv4Addr;
 use std::os::fd::AsFd;
 use std::process::Command;
+use std::sync::Mutex;
 
 use nix::unistd;
 
@@ -25,6 +26,8 @@ const VISOR_GUEST_SUPERNET: &str = "172.20.0.0/16";
 const VISOR_SHARED_GUEST_SUPERNET: &str = "100.64.0.0/10";
 const VISOR_IPTABLES_TAG_PREFIX: &str = "visor-";
 const VISOR_IPTABLES_TABLES: &[&str] = &["nat", "filter"];
+const DOCKER_USER_CHAIN: &str = "DOCKER-USER";
+static IPTABLES_SETUP_LOCK: Mutex<()> = Mutex::new(());
 
 // ── Linux network backend ────────────────────────────────────────────
 
@@ -126,6 +129,7 @@ impl NetworkBackend for LinuxNetworkBackend {
     }
 
     fn setup_nat(&self, config: &NatConfig) -> Result<Self::Nat, NetError> {
+        ensure_docker_user_chain()?;
         let rules = generate_nat_rules(config);
         let mut applied: Vec<IptablesRule> = Vec::new();
 
@@ -360,6 +364,29 @@ impl IptablesRule {
         Ok(())
     }
 
+    #[must_use]
+    pub(crate) fn check_args(&self) -> Vec<String> {
+        let mut args = self.args.clone();
+        if matches!(args.first().map(String::as_str), Some("-A" | "-I")) {
+            let inserted_at_position = args.first().is_some_and(|operation| operation == "-I")
+                && args.get(2).is_some_and(|position| position == "1");
+            "-C".clone_into(&mut args[0]);
+            if inserted_at_position {
+                args.remove(2);
+            }
+        }
+        args
+    }
+
+    fn exists(&self) -> Result<bool, NetError> {
+        let output = Command::new("iptables")
+            .arg("-t")
+            .arg(&self.table)
+            .args(self.check_args())
+            .output()?;
+        Ok(output.status.success())
+    }
+
     /// Generate the delete (-D) version of this rule's arguments.
     ///
     /// Replaces `-A` with `-D` in the argument list.
@@ -399,6 +426,124 @@ impl IptablesRule {
         }
         Ok(())
     }
+}
+
+fn docker_user_chain_rules() -> [IptablesRule; 2] {
+    [
+        IptablesRule {
+            table: "filter".to_owned(),
+            args: vec![
+                "-I".to_owned(),
+                "FORWARD".to_owned(),
+                "1".to_owned(),
+                "-j".to_owned(),
+                DOCKER_USER_CHAIN.to_owned(),
+            ],
+        },
+        IptablesRule {
+            table: "filter".to_owned(),
+            args: vec![
+                "-A".to_owned(),
+                DOCKER_USER_CHAIN.to_owned(),
+                "-j".to_owned(),
+                "RETURN".to_owned(),
+            ],
+        },
+    ]
+}
+
+fn ensure_docker_user_chain() -> Result<(), NetError> {
+    let guard = IPTABLES_SETUP_LOCK
+        .lock()
+        .map_err(|error| NetError::Nat(format!("lock iptables setup: {error}")))?;
+    ensure_filter_chain(DOCKER_USER_CHAIN)?;
+
+    let [hook, terminal_return] = docker_user_chain_rules();
+    let forward_rules = list_filter_chain_rules("FORWARD")?;
+    let repair = docker_user_hook_repair_plan(&forward_rules);
+    let remove_hook = IptablesRule {
+        table: "filter".to_owned(),
+        args: vec![
+            "-D".to_owned(),
+            "FORWARD".to_owned(),
+            "-j".to_owned(),
+            DOCKER_USER_CHAIN.to_owned(),
+        ],
+    };
+    for _ in 0..repair.remove_count {
+        remove_hook.apply()?;
+    }
+    if repair.insert_at_head {
+        hook.apply()?;
+    }
+    if !terminal_return.exists()? {
+        terminal_return.apply()?;
+    }
+    drop(guard);
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DockerUserHookRepairPlan {
+    remove_count: usize,
+    insert_at_head: bool,
+}
+
+fn docker_user_hook_repair_plan(forward_rules: &str) -> DockerUserHookRepairPlan {
+    let rules = forward_rules
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("-A FORWARD "))
+        .collect::<Vec<_>>();
+    let hook_count = rules
+        .iter()
+        .filter(|line| **line == "-A FORWARD -j DOCKER-USER")
+        .count();
+    let already_normalized =
+        hook_count == 1 && rules.first().copied() == Some("-A FORWARD -j DOCKER-USER");
+
+    DockerUserHookRepairPlan {
+        remove_count: if already_normalized { 0 } else { hook_count },
+        insert_at_head: !already_normalized,
+    }
+}
+
+fn list_filter_chain_rules(chain: &str) -> Result<String, NetError> {
+    let output = Command::new("iptables")
+        .args(["-t", "filter", "-S", chain])
+        .output()?;
+    if !output.status.success() {
+        return Err(NetError::Nat(format!(
+            "iptables -t filter -S {chain} failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn ensure_filter_chain(chain: &str) -> Result<(), NetError> {
+    if filter_chain_exists(chain)? {
+        return Ok(());
+    }
+
+    let output = Command::new("iptables")
+        .args(["-t", "filter", "-N", chain])
+        .output()?;
+    if output.status.success() || filter_chain_exists(chain)? {
+        return Ok(());
+    }
+
+    Err(NetError::Nat(format!(
+        "failed to create {chain} chain: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    )))
+}
+
+fn filter_chain_exists(chain: &str) -> Result<bool, NetError> {
+    let output = Command::new("iptables")
+        .args(["-t", "filter", "-n", "-L", chain])
+        .output()?;
+    Ok(output.status.success())
 }
 
 impl fmt::Display for IptablesRule {
@@ -915,6 +1060,7 @@ fn bridge_has_member_interfaces(name: &str) -> Result<bool, NetError> {
 }
 
 pub(crate) fn ensure_shared_bridge_nat(interface: &str, subnet: &str) -> Result<(), NetError> {
+    ensure_docker_user_chain()?;
     let desired_rules = generate_shared_nat_rules(interface, subnet);
     let comment_prefix = format!("visor-sharednat-{interface}");
     let existing_rules = list_visor_iptables_rules_with_comment(&comment_prefix)?;

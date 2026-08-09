@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::debug;
 use uuid::Uuid;
-use visor_types::{ExecResult, GuestNetworkLink, ImageInfo, VmInfo, VmState};
+use visor_types::{ExecResult, FIRST_GUEST_CID, GuestNetworkLink, ImageInfo, VmInfo, VmState};
 
 use crate::translate;
 use crate::types::{
@@ -1320,7 +1320,8 @@ pub async fn container_create(
 ) -> Result<Response, Response> {
     debug!(image = %body.image, name = ?query.name, cmd = ?body.cmd, entrypoint = ?body.entrypoint, env = ?body.env, "docker container create body");
 
-    let config = translate::docker_create_to_vm_config(&body, query.name.as_deref(), true);
+    let config = translate::docker_create_to_vm_config(&body, query.name.as_deref(), true)
+        .map_err(|error| docker_error(StatusCode::BAD_REQUEST, error.to_string()))?;
     debug!(vm_cmd = ?config.cmd, vm_env_count = config.env.len(), vm_memory = config.memory_mib, "translated VmConfig");
     let id = Uuid::new_v4().to_string();
     state.containers.lock().await.insert(
@@ -1353,14 +1354,12 @@ pub async fn container_inspect(
     let vm = load_container_view(&state, &id)
         .await
         .ok_or_else(|| docker_error(StatusCode::NOT_FOUND, format!("No such container: {id}")))?;
-    let labels = load_container_config(&state, &id)
-        .await
-        .map(|config| config.labels)
-        .unwrap_or_default();
+    let inspect = match load_container_config(&state, &id).await {
+        Some(config) => translate::vm_info_to_inspect_with_config(&vm, &config),
+        None => translate::vm_info_to_inspect(&vm),
+    };
 
-    Ok(Json(translate::vm_info_to_inspect_with_labels(
-        &vm, &labels,
-    )))
+    Ok(Json(inspect))
 }
 
 /// `POST /containers/{id}/start` — Starts a container.
@@ -2373,19 +2372,27 @@ pub async fn network_inspect(
         .or_else(|| networks.values().find(|network| network.name == id));
 
     match record {
-        Some(network) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "Id": network.id,
-                "Name": network.name,
-                "Driver": network.driver,
-                "Scope": "local",
-                "Labels": network.labels,
-                "Containers": {},
-                "Options": {}
-            })),
-        )
-            .into_response(),
+        Some(network) => {
+            let gateway =
+                GuestNetworkLink::for_named_network(&network.name, FIRST_GUEST_CID).gateway_ip;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "Id": network.id,
+                    "Name": network.name,
+                    "Driver": network.driver,
+                    "Scope": "local",
+                    "Labels": network.labels,
+                    "Containers": {},
+                    "Options": {},
+                    "IPAM": {
+                        "Driver": "default",
+                        "Config": [{"Gateway": gateway}]
+                    }
+                })),
+            )
+                .into_response()
+        }
         None => docker_error(StatusCode::NOT_FOUND, format!("No such network: {id}")),
     }
 }

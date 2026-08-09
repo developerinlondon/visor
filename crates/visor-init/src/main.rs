@@ -49,6 +49,10 @@ fn run() -> anyhow::Result<()> {
 
     // Step 3: Read configuration from kernel cmdline
     let config = visor_init::config::RunConfig::from_kernel_cmdline();
+    if let Some(limit) = config.process_limit {
+        visor_init::mount::configure_process_limit(limit)
+            .context("failed to configure process limit")?;
+    }
 
     // Step 4: Configure networking (if provided)
     let networks = config.effective_networks();

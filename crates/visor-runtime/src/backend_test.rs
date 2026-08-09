@@ -121,6 +121,26 @@ fn vm_config_default_vcpus_is_1() {
 }
 
 #[test]
+fn rootfs_options_use_requested_writable_size() {
+    let requested = rootfs_options(Some(1024));
+    let defaulted = rootfs_options(None);
+
+    assert_eq!(requested.extra_size_mb, 1024);
+    assert_eq!(defaulted.extra_size_mb, 256);
+}
+
+#[test]
+fn guest_run_config_receives_the_vm_process_limit() {
+    let mut vm_config = VmConfig::new("alpine:latest");
+    vm_config.process_limit = Some(256);
+    let mut run_config = visor_init::config::RunConfig::default();
+
+    apply_guest_resource_limits(&vm_config, &mut run_config);
+
+    assert_eq!(run_config.process_limit, Some(256));
+}
+
+#[test]
 fn vm_config_default_cmd_is_empty() {
     let json = r#"{"image": "alpine:latest"}"#;
     let config: VmConfig = serde_json::from_str(json).unwrap();

@@ -21,6 +21,7 @@ fn parse_config_with_all_fields() {
         "cmd": ["/usr/bin/python", "-c", "print('hi')"],
         "env": ["HOME=/root", "PATH=/usr/bin"],
         "workdir": "/app",
+        "process_limit": 256,
         "network": {
             "address": "10.0.0.5",
             "netmask": "255.255.255.0",
@@ -35,6 +36,7 @@ fn parse_config_with_all_fields() {
     assert_eq!(config.cmd.len(), 3);
     assert_eq!(config.env, vec!["HOME=/root", "PATH=/usr/bin"]);
     assert_eq!(config.workdir, "/app");
+    assert_eq!(config.process_limit, Some(256));
 
     let net = config.network.as_ref().unwrap();
     assert_eq!(net.address, "10.0.0.5");
@@ -66,6 +68,7 @@ fn round_trip_serialize_deserialize() {
         cmd: vec!["/bin/cat".to_owned(), "/etc/hosts".to_owned()],
         env: vec!["LANG=C".to_owned()],
         workdir: "/tmp".to_owned(),
+        process_limit: Some(256),
         network: Some(NetworkConfig {
             name: None,
             interface: None,
@@ -98,6 +101,7 @@ fn round_trip_serialize_deserialize() {
     assert_eq!(original.cmd, restored.cmd);
     assert_eq!(original.env, restored.env);
     assert_eq!(original.workdir, restored.workdir);
+    assert_eq!(original.process_limit, restored.process_limit);
     assert_eq!(
         original.network.as_ref().unwrap().address,
         restored.network.as_ref().unwrap().address
@@ -262,6 +266,7 @@ fn default_run_config_has_bin_sh() {
     assert!(config.network.is_none());
     assert!(config.networks.is_empty());
     assert!(config.volumes.is_empty());
+    assert!(config.process_limit.is_none());
     assert!(!config.exec_listener);
 }
 

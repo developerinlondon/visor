@@ -171,7 +171,7 @@ Content-Type: application/json
 Api-Version: 1.45
 Docker-Experimental: false
 Ostype: linux
-Server: visor/0.0.7
+Server: visor/0.0.8
 ```
 
 All responses include the `Api-Version` header. The `Server` header identifies
