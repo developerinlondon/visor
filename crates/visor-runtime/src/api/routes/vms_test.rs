@@ -521,15 +521,13 @@ fn test_state_with_pool() -> AppState {
 }
 
 #[tokio::test]
-async fn create_vm_uses_pool_when_available() {
+async fn create_vm_preserves_pool_for_non_detached_request() {
     let state = test_state_with_pool();
 
-    // Warm the pool with one VM
     let pool = state.pool.as_ref().unwrap();
     pool.warm("alpine:latest", 1).await.unwrap();
     assert_eq!(pool.status().await.total, 1);
 
-    // POST to create a VM with the same image
     let app = build_router(state.clone());
     let body = serde_json::json!({ "image": "alpine:latest" });
     let response = app
@@ -538,8 +536,25 @@ async fn create_vm_uses_pool_when_available() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
+    assert_eq!(pool.status().await.total, 1);
+}
 
-    // Pool should now be empty (VM was acquired from pool)
+#[tokio::test]
+async fn create_vm_uses_pool_when_creation_config_matches() {
+    let state = test_state_with_pool();
+
+    let pool = state.pool.as_ref().unwrap();
+    pool.warm("alpine:latest", 1).await.unwrap();
+    assert_eq!(pool.status().await.total, 1);
+
+    let app = build_router(state.clone());
+    let body = serde_json::json!({ "image": "alpine:latest", "detach": true });
+    let response = app
+        .oneshot(json_request("POST", "/v1/vms", Some(body)))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
     assert_eq!(pool.status().await.total, 0);
 }
 

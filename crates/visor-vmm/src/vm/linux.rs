@@ -529,7 +529,7 @@ fn create_vsock_device(
     let muxer = VsockMuxer::new(
         vsock,
         u64::from(guest_cid),
-        std::path::PathBuf::from(crate::comms::muxer::MuxerCommsBackend::DEFAULT_SOCKET_DIR),
+        crate::comms::muxer::MuxerCommsBackend::configured_socket_dir(),
         tx_notify,
         rx_kick,
     )

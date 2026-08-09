@@ -1127,6 +1127,7 @@ impl VmmBackend {
         run_config.cmd = cmd;
         run_config.env = env;
         run_config.workdir = workdir;
+        apply_guest_resource_limits(config, &mut run_config);
         let guest_networks = guest_network_configs_for_vm(config, cid);
         if guest_networks.len() <= 1 {
             run_config.network = guest_networks.first().cloned();
@@ -1495,6 +1496,7 @@ impl VmmBackend {
                 repository,
                 &local_image.manifest,
                 &local_image.image_config,
+                config.rootfs_extra_size_mib,
             )
             .await?;
             let rootfs_ms = t_rootfs.elapsed().as_millis();
@@ -1571,9 +1573,16 @@ impl VmmBackend {
 
         // 5. Download layers, merge, and build rootfs
         let t_rootfs = std::time::Instant::now();
-        let (rootfs_path, tmp_dir) =
-            download_and_build_rootfs(id, &cache, registry, repository, &manifest, &image_config)
-                .await?;
+        let (rootfs_path, tmp_dir) = download_and_build_rootfs(
+            id,
+            &cache,
+            registry,
+            repository,
+            &manifest,
+            &image_config,
+            config.rootfs_extra_size_mib,
+        )
+        .await?;
         let rootfs_ms = t_rootfs.elapsed().as_millis();
 
         let pull_total_ms = pull_start.elapsed().as_millis();
@@ -1588,6 +1597,10 @@ impl VmmBackend {
 
         Ok((rootfs_path, image_config, tmp_dir))
     }
+}
+
+fn apply_guest_resource_limits(config: &VmConfig, run_config: &mut visor_init::config::RunConfig) {
+    run_config.process_limit = config.process_limit;
 }
 
 #[derive(Debug)]
@@ -1743,16 +1756,23 @@ fn guest_network_configs_for_vm(
         return vec![default_guest_network_for_cid(cid)];
     }
 
-    let mut networks = Vec::with_capacity(config.networks.len() + usize::from(needs_host_access_network));
+    let mut networks =
+        Vec::with_capacity(config.networks.len() + usize::from(needs_host_access_network));
 
     if needs_host_access_network {
         networks.push(default_guest_network_for_cid(cid));
     }
 
-    networks.extend(config.networks.iter().enumerate().map(|(index, network_name)| {
-        let interface_index = index + usize::from(needs_host_access_network);
-        named_guest_network_for_name(network_name, cid, interface_index)
-    }));
+    networks.extend(
+        config
+            .networks
+            .iter()
+            .enumerate()
+            .map(|(index, network_name)| {
+                let interface_index = index + usize::from(needs_host_access_network);
+                named_guest_network_for_name(network_name, cid, interface_index)
+            }),
+    );
 
     networks
 }
@@ -2133,6 +2153,7 @@ async fn download_and_build_rootfs(
     repository: &str,
     manifest: &crate::oci::registry::Manifest,
     _image_config: &crate::oci::config::ImageConfig,
+    rootfs_extra_size_mib: Option<u64>,
 ) -> anyhow::Result<(std::path::PathBuf, std::path::PathBuf)> {
     use crate::oci::layers::LayerMerger;
     use crate::oci::registry::RegistryClient;
@@ -2192,12 +2213,24 @@ async fn download_and_build_rootfs(
     // Build ext4 rootfs
     tracing::debug!(vm_id = id, "pull: building ext4 rootfs");
     let rootfs_path = tmp_dir.join("rootfs.ext4");
-    RootfsBuilder::new(&merged_dir, &rootfs_path)
-        .build()
-        .context("build ext4 rootfs image")?;
+    RootfsBuilder::with_options(
+        &merged_dir,
+        &rootfs_path,
+        rootfs_options(rootfs_extra_size_mib),
+    )
+    .build()
+    .context("build ext4 rootfs image")?;
     tracing::debug!(vm_id = id, rootfs = %rootfs_path.display(), "pull: rootfs complete");
 
     Ok((rootfs_path, tmp_dir))
+}
+
+fn rootfs_options(rootfs_extra_size_mib: Option<u64>) -> crate::oci::rootfs::RootfsOptions {
+    let mut options = crate::oci::rootfs::RootfsOptions::default();
+    if let Some(extra_size_mib) = rootfs_extra_size_mib {
+        options.extra_size_mb = extra_size_mib;
+    }
+    options
 }
 
 /// Copy the visor-init binary into the merged rootfs at `/sbin/visor-init`.

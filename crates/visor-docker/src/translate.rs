@@ -21,6 +21,29 @@ use crate::types::{
 #[path = "translate_test.rs"]
 mod tests;
 
+/// Invalid Docker create options that cannot be represented safely by Visor.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DockerConfigError {
+    /// Docker requested a storage option Visor does not implement.
+    #[error("unsupported storage option: {0}")]
+    UnsupportedStorageOption(String),
+    /// Docker supplied an invalid writable-layer size.
+    #[error("invalid storage size: {0}")]
+    InvalidStorageSize(String),
+    /// Docker requested more writable-layer headroom than Visor permits.
+    #[error("storage size {requested_mib} MiB exceeds maximum {maximum_mib} MiB")]
+    StorageSizeTooLarge {
+        /// Parsed requested writable headroom.
+        requested_mib: u64,
+        /// Maximum writable headroom Visor accepts.
+        maximum_mib: u64,
+    },
+    /// Docker supplied a process limit below the supported unlimited sentinel.
+    #[error("invalid process limit: {0}")]
+    InvalidProcessLimit(i64),
+}
+
 /// Converts a Docker `ContainerCreateRequest` into a visor `VmConfig`.
 ///
 /// Maps Docker container concepts to VM configuration:
@@ -31,12 +54,16 @@ mod tests;
 /// - `HostConfig.PortBindings` → `VmConfig.ports`
 /// - `HostConfig.Binds` → `VmConfig.volumes`
 /// - `HostConfig.Memory` → `VmConfig.memory_mib` (bytes → MiB)
-#[must_use]
+///
+/// # Errors
+///
+/// Returns [`DockerConfigError`] when a requested resource limit cannot be
+/// represented safely or a storage option is unsupported.
 pub fn docker_create_to_vm_config(
     req: &ContainerCreateRequest,
     name: Option<&str>,
     detach: bool,
-) -> VmConfig {
+) -> Result<VmConfig, DockerConfigError> {
     let mut config = VmConfig::new(&req.image);
 
     if let Some(ref entrypoint) = req.entrypoint {
@@ -91,9 +118,67 @@ pub fn docker_create_to_vm_config(
             let cpus = u32::try_from(nano / 1_000_000_000).unwrap_or(1);
             config.vcpus = cpus.max(1);
         }
+
+        config.process_limit = parse_process_limit(hc.pids_limit)?;
+        config.rootfs_extra_size_mib = parse_storage_options(hc.storage_opt.as_ref())?;
     }
 
-    config
+    Ok(config)
+}
+
+fn parse_process_limit(limit: Option<i64>) -> Result<Option<u64>, DockerConfigError> {
+    match limit {
+        None | Some(-1 | 0) => Ok(None),
+        Some(limit) if limit > 0 => u64::try_from(limit)
+            .map(Some)
+            .map_err(|_| DockerConfigError::InvalidProcessLimit(limit)),
+        Some(limit) => Err(DockerConfigError::InvalidProcessLimit(limit)),
+    }
+}
+
+fn parse_storage_options(
+    options: Option<&HashMap<String, String>>,
+) -> Result<Option<u64>, DockerConfigError> {
+    let Some(options) = options else {
+        return Ok(None);
+    };
+    if let Some(option) = options.keys().find(|key| key.as_str() != "size") {
+        return Err(DockerConfigError::UnsupportedStorageOption(option.clone()));
+    }
+    options
+        .get("size")
+        .map(|value| parse_storage_size_mib(value))
+        .transpose()
+}
+
+fn parse_storage_size_mib(value: &str) -> Result<u64, DockerConfigError> {
+    let normalized = value.trim().to_ascii_lowercase();
+    let number_end = normalized
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(normalized.len());
+    let (number, suffix) = normalized.split_at(number_end);
+    let amount = number
+        .parse::<u64>()
+        .ok()
+        .filter(|amount| *amount > 0)
+        .ok_or_else(|| DockerConfigError::InvalidStorageSize(value.to_owned()))?;
+    let mib = match suffix {
+        "" | "b" => Some(amount.div_ceil(1024 * 1024)),
+        "k" | "kb" | "kib" => Some(amount.div_ceil(1024)),
+        "m" | "mb" | "mib" => Some(amount),
+        "g" | "gb" | "gib" => amount.checked_mul(1024),
+        "t" | "tb" | "tib" => amount.checked_mul(1024 * 1024),
+        _ => None,
+    }
+    .filter(|size| *size > 0)
+    .ok_or_else(|| DockerConfigError::InvalidStorageSize(value.to_owned()))?;
+    if mib > visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB {
+        return Err(DockerConfigError::StorageSizeTooLarge {
+            requested_mib: mib,
+            maximum_mib: visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB,
+        });
+    }
+    Ok(mib)
 }
 
 fn docker_network_enabled(req: &ContainerCreateRequest) -> bool {
@@ -313,6 +398,48 @@ pub fn vm_info_to_inspect_with_labels<S: std::hash::BuildHasher>(
     inspect.config.labels = labels
         .iter()
         .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    inspect
+}
+
+/// Converts a visor VM and its creation config into a Docker inspect response.
+///
+/// Every VM exposes its requested Docker network membership. Running VMs also
+/// expose their deterministic guest addresses; non-running VMs retain empty
+/// address fields. Containers without a named network use Docker's default
+/// `bridge` entry.
+#[must_use]
+pub fn vm_info_to_inspect_with_config(
+    info: &VmInfo,
+    config: &VmConfig,
+) -> ContainerInspectResponse {
+    let mut inspect = vm_info_to_inspect_with_labels(info, &config.labels);
+    let network_names = if config.networks.is_empty() {
+        vec!["bridge".to_owned()]
+    } else {
+        config.networks.clone()
+    };
+    let running_cid = info.cid.filter(|_| info.state == VmState::Running);
+    inspect.network_settings.networks = network_names
+        .into_iter()
+        .map(|network_name| {
+            let (ip_address, gateway) = if let Some(cid) = running_cid {
+                let link = if network_name == "bridge" {
+                    visor_types::GuestNetworkLink::for_cid(cid)
+                } else {
+                    visor_types::GuestNetworkLink::for_named_network(&network_name, cid)
+                };
+                (link.guest_ip.to_string(), link.gateway_ip.to_string())
+            } else {
+                (String::new(), String::new())
+            };
+            let entry = NetworkEntry {
+                network_i_d: network_name.clone(),
+                ip_address,
+                gateway,
+            };
+            (network_name, entry)
+        })
         .collect();
     inspect
 }

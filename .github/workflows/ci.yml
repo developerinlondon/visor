@@ -10,6 +10,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   # Compiling a guest kernel to typecheck the workspace would cost 15 minutes
@@ -22,6 +25,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify hardware contracts
+        run: |
+          bash tests/ci_hardware_trust_test.sh
+          bash tests/ci_hardware_runtime_test.sh
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -30,10 +38,14 @@ jobs:
 
       - name: Stub the guest kernel
         run: |
-          # visor-kernel's build script accepts any file above its size floor.
-          # This job builds and lints host code; booting a VM is not in scope.
-          head -c 2000000 /dev/zero > "${RUNNER_TEMP}/vmlinux-x86_64"
-          echo "VISOR_KERNEL_PATH=${RUNNER_TEMP}/vmlinux-x86_64" >> "$GITHUB_ENV"
+          # Host tests validate the embedded artifact's size, ELF magic, and
+          # version metadata. This fixture satisfies those checks but is not
+          # bootable; hardware tests use a real release kernel on a KVM host.
+          kernel_path="${RUNNER_TEMP}/vmlinux-x86_64"
+          truncate -s 2000000 "$kernel_path"
+          printf '\177ELF' | dd of="$kernel_path" conv=notrunc status=none
+          printf 'Linux version 0.0.0-ci\0' | dd of="$kernel_path" bs=1 seek=256 conv=notrunc status=none
+          echo "VISOR_KERNEL_PATH=$kernel_path" >> "$GITHUB_ENV"
 
       # AGENTS.md asks for zero clippy warnings, but the tree carries ~53
       # pedantic ones under current stable, so blocking on it would fail every
@@ -42,9 +54,80 @@ jobs:
       - run: cargo clippy --workspace -- -D warnings
         continue-on-error: true
 
-      - run: cargo test --workspace
+      # GitHub-hosted runners do not provide the KVM, TAP, real guest kernel,
+      # or static guest init required by the hardware integration suites.
+      # Those run on a KVM host as a separate release gate.
+      - name: Test host code
+        run: >-
+          cargo test --workspace --exclude visor-vmm --lib --bins --
+          --skip devices::vsock_muxer::tests::connection_limit_enforced
+
+      - name: Test VMM host utilities
+        run: |
+          if [[ "$(id -u)" == "0" ]]; then
+            echo "VMM host utility tests require a non-root runner" >&2
+            exit 1
+          fi
+          cargo test -p visor-vmm test_temp_root
+          cargo test -p visor-vmm net::linux::tests::create_interface_requires_root
+
+      - name: Test documentation
+        run: cargo test --workspace --doc
 
       - name: dprint check
         run: |
           curl -fsSL https://dprint.dev/install.sh | sh -s > /dev/null
           "$HOME/.dprint/bin/dprint" check
+
+  hardware:
+    needs: check
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, linux, x64, visor-kvm]
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      # dtolnay/rust-toolchain stable
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      # Swatinem/rust-cache v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6
+
+      - name: Verify hardware access
+        run: |
+          python3 - <<'PY'
+          import os
+
+          for path in ("/dev/kvm", "/dev/net/tun"):
+              descriptor = os.open(path, os.O_RDWR | os.O_CLOEXEC)
+              os.close(descriptor)
+              print(f"opened {path}")
+          PY
+          short_root="/tmp/visor-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$short_root/vsock" "$short_root/tests"
+          echo "VISOR_VSOCK_SOCKET_DIR=$short_root/vsock" >> "$GITHUB_ENV"
+          echo "VISOR_TEST_TEMP_ROOT=$short_root/tests" >> "$GITHUB_ENV"
+
+      - name: Build guest kernel
+        run: |
+          ./crates/visor-kernel/scripts/build-kernel.sh "$RUNNER_TEMP/visor-kernel"
+          echo "VISOR_KERNEL_PATH=$RUNNER_TEMP/visor-kernel/vmlinux-x86_64" >> "$GITHUB_ENV"
+
+      - name: Build static guest init
+        run: cargo build -p visor-init --release --target x86_64-unknown-linux-musl
+
+      - name: Test KVM host code
+        run: >-
+          cargo test -p visor-vmm --lib --
+          --skip net::linux::tests::create_interface_requires_root
+          --skip devices::vsock_muxer::tests::connection_limit_enforced
+
+      - name: Test real guest boots
+        run: cargo test -p visor-runtime --test boot -- --test-threads=1

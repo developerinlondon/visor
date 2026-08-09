@@ -188,8 +188,10 @@ impl PoolManager {
     ///
     /// Returns an error if all creation paths fail.
     pub async fn acquire_with_config(&self, config: VmConfig) -> anyhow::Result<VmInfo> {
-        // 1. Try to pop a pre-warmed VM from the pool.
-        {
+        // 1. Reuse a pre-warmed VM only when its complete creation config
+        // matches. A running VM cannot retroactively adopt resource, command,
+        // network, or filesystem settings from a different request.
+        if config == self.vm_config_for_image(&config.image) {
             let mut pools = self.pools.write().await;
             if let Some(pool) = pools.get_mut(&config.image) {
                 if let Some(vm) = pool.pop() {

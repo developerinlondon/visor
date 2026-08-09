@@ -105,6 +105,9 @@ const ESSENTIAL_DEVICES: &[(&str, u64, u64, u32)] = &[
     ("/dev/urandom", 1, 9, 0o444),
 ];
 
+const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+const WORKLOAD_CGROUP: &str = "visor";
+
 /// Mount all initial filesystems required for guest boot.
 ///
 /// Iterates [`INIT_MOUNTS`], creates each target directory if it does not
@@ -145,6 +148,49 @@ pub fn mount_initial_filesystems() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Prepare a cgroup v2 PIDs limit for guest workload processes.
+///
+/// Guest init remains in the root cgroup so its management processes do not
+/// consume the workload allowance. Each workload launcher joins the child
+/// cgroup immediately before replacing itself with the requested command.
+///
+/// # Errors
+///
+/// Returns an error when the limit is zero or the guest cgroup hierarchy cannot
+/// be configured.
+pub fn configure_process_limit(limit: u64) -> anyhow::Result<()> {
+    configure_process_limit_at(Path::new(CGROUP_ROOT), limit)
+}
+
+fn configure_process_limit_at(root: &Path, limit: u64) -> anyhow::Result<()> {
+    anyhow::ensure!(limit > 0, "process limit must be greater than zero");
+
+    let workload = root.join(WORKLOAD_CGROUP);
+    fs::create_dir_all(&workload).context("create guest workload cgroup")?;
+    fs::write(root.join("cgroup.subtree_control"), "+pids")
+        .context("enable guest pids controller")?;
+    fs::write(workload.join("pids.max"), limit.to_string()).context("set guest process limit")?;
+    Ok(())
+}
+
+/// Move the current process into the limited workload cgroup.
+///
+/// This is called only by the trusted workload launcher immediately before it
+/// replaces itself with the requested command.
+///
+/// # Errors
+///
+/// Returns an error when the workload cgroup is unavailable or has reached its
+/// process limit.
+pub fn join_workload_cgroup() -> anyhow::Result<()> {
+    join_workload_cgroup_at(Path::new(CGROUP_ROOT))
+}
+
+fn join_workload_cgroup_at(root: &Path) -> anyhow::Result<()> {
+    fs::write(root.join(WORKLOAD_CGROUP).join("cgroup.procs"), "0")
+        .context("join guest workload cgroup")
 }
 
 /// Validate a new root path for `pivot_root`.

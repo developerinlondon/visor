@@ -5,9 +5,9 @@ use crate::comms::backend::{CommsBackend, CommsError};
 
 #[test]
 fn muxer_comms_backend_default() {
-    let backend = MuxerCommsBackend::default();
+    let socket_dir = configured_socket_dir_from(None);
     assert_eq!(
-        backend.socket_dir().to_str().unwrap(),
+        socket_dir.to_str().unwrap(),
         MuxerCommsBackend::DEFAULT_SOCKET_DIR
     );
 }
@@ -16,6 +16,14 @@ fn muxer_comms_backend_default() {
 fn muxer_comms_backend_custom_socket_dir() {
     let backend = MuxerCommsBackend::with_socket_dir(PathBuf::from("/tmp/visor-test"));
     assert_eq!(backend.socket_dir(), Path::new("/tmp/visor-test"));
+}
+
+#[test]
+fn muxer_socket_dir_prefers_the_runtime_override() {
+    let socket_dir =
+        configured_socket_dir_from(Some(std::ffi::OsString::from("/tmp/visor-runtime/vsock")));
+
+    assert_eq!(socket_dir, PathBuf::from("/tmp/visor-runtime/vsock"));
 }
 
 #[test]

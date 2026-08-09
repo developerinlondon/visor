@@ -37,6 +37,10 @@ pub struct RunConfig {
     #[serde(rename = "w", alias = "workdir")]
     #[serde(skip_serializing_if = "is_default_workdir")]
     pub workdir: String,
+    /// Maximum number of processes and threads allowed inside the guest workload.
+    #[serde(rename = "p", alias = "process_limit")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_limit: Option<u64>,
     /// Network configuration for the guest.
     #[serde(rename = "n", alias = "network")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -141,12 +145,18 @@ fn is_default_mode(mode: &str) -> bool {
 
 // serde's skip_serializing_if takes a fn(&T) -> bool, so the reference is
 // the external contract rather than a choice clippy can improve on.
-#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde skip_serializing_if signature")]
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if signature"
+)]
 const fn is_false(value: &bool) -> bool {
     !*value
 }
 
-#[expect(clippy::trivially_copy_pass_by_ref, reason = "serde skip_serializing_if signature")]
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if signature"
+)]
 const fn is_default_network_default_route(value: &bool) -> bool {
     *value
 }
@@ -324,6 +334,7 @@ impl Default for RunConfig {
             cmd: vec!["/bin/sh".to_owned()],
             env: Vec::new(),
             workdir: "/".to_owned(),
+            process_limit: None,
             network: None,
             networks: Vec::new(),
             extra_hosts: Vec::new(),

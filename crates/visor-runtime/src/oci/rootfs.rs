@@ -112,9 +112,8 @@ impl RootfsBuilder {
         // Calculate required image size.
         let content_bytes =
             calculate_dir_size(&self.source_dir).context("calculate source directory size")?;
-        let extra_bytes = self.options.extra_size_mb * 1024 * 1024;
-        let min_bytes = MIN_IMAGE_SIZE_MB * 1024 * 1024;
-        let total_bytes = (content_bytes + extra_bytes).max(min_bytes);
+        let total_bytes = calculate_rootfs_size_bytes(content_bytes, self.options.extra_size_mb)
+            .context("calculate rootfs image size")?;
 
         // mke2fs with -b 4096 expects size in 4K-block units.
         let block_size: u64 = 4096;
@@ -147,6 +146,21 @@ impl RootfsBuilder {
 
         Ok(self.output.clone())
     }
+}
+
+fn calculate_rootfs_size_bytes(content_bytes: u64, extra_size_mib: u64) -> anyhow::Result<u64> {
+    anyhow::ensure!(
+        extra_size_mib <= visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB,
+        "rootfs extra size {extra_size_mib} MiB exceeds maximum {} MiB",
+        visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB
+    );
+    let extra_bytes = extra_size_mib
+        .checked_mul(1024 * 1024)
+        .context("rootfs extra size overflows bytes")?;
+    let total_bytes = content_bytes
+        .checked_add(extra_bytes)
+        .context("rootfs size overflows u64")?;
+    Ok(total_bytes.max(MIN_IMAGE_SIZE_MB * 1024 * 1024))
 }
 
 /// Recursively calculate the total size of regular files in a directory.

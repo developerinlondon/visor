@@ -144,6 +144,32 @@ fn snapshot_key_for_config_changes_when_guest_virtualization_changes() {
 }
 
 #[test]
+fn snapshot_key_for_config_changes_when_process_limit_changes() {
+    let mut first = VmConfig::new("alpine:latest");
+    first.process_limit = Some(128);
+    let mut second = VmConfig::new("alpine:latest");
+    second.process_limit = Some(256);
+
+    let first_key = snapshot_key_for_config(&first).unwrap();
+    let second_key = snapshot_key_for_config(&second).unwrap();
+
+    assert_ne!(first_key, second_key);
+}
+
+#[test]
+fn snapshot_key_for_config_changes_when_rootfs_size_changes() {
+    let mut first = VmConfig::new("alpine:latest");
+    first.rootfs_extra_size_mib = Some(512);
+    let mut second = VmConfig::new("alpine:latest");
+    second.rootfs_extra_size_mib = Some(1024);
+
+    let first_key = snapshot_key_for_config(&first).unwrap();
+    let second_key = snapshot_key_for_config(&second).unwrap();
+
+    assert_ne!(first_key, second_key);
+}
+
+#[test]
 fn supports_snapshot_fast_path_rejects_configs_with_volumes() {
     let mut config = VmConfig::new("alpine:latest");
     config

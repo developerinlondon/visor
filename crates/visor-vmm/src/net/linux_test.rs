@@ -122,6 +122,37 @@ fn nat_rules_contain_comment() {
 }
 
 #[test]
+fn docker_user_hook_precedes_client_policy_and_returns_to_forwarding() {
+    let rules = docker_user_chain_rules();
+
+    assert_eq!(rules[0].args, ["-I", "FORWARD", "1", "-j", "DOCKER-USER"]);
+    assert_eq!(
+        rules[0].check_args(),
+        ["-C", "FORWARD", "-j", "DOCKER-USER"]
+    );
+    assert_eq!(rules[1].args, ["-A", "DOCKER-USER", "-j", "RETURN"]);
+    assert_eq!(rules[1].check_args(), ["-C", "DOCKER-USER", "-j", "RETURN"]);
+}
+
+#[test]
+fn docker_user_hook_repairs_a_misplaced_forward_jump() {
+    let misplaced = "-P FORWARD ACCEPT\n-A FORWARD -j ACCEPT\n-A FORWARD -j DOCKER-USER\n";
+    let leading = "-P FORWARD ACCEPT\n-A FORWARD -j DOCKER-USER\n-A FORWARD -j ACCEPT\n";
+
+    assert!(docker_user_hook_repair_plan(misplaced).insert_at_head);
+    assert!(!docker_user_hook_repair_plan(leading).insert_at_head);
+}
+
+#[test]
+fn docker_user_hook_repair_plan_normalizes_duplicates() {
+    let duplicate = "-P FORWARD ACCEPT\n-A FORWARD -j ACCEPT\n-A FORWARD -j DOCKER-USER\n-A FORWARD -j DOCKER-USER\n";
+    let repair = docker_user_hook_repair_plan(duplicate);
+
+    assert_eq!(repair.remove_count, 2);
+    assert!(repair.insert_at_head);
+}
+
+#[test]
 fn route_localnet_sysctl_path_points_to_interface_setting() {
     assert_eq!(
         route_localnet_sysctl_path("vsr123"),

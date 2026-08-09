@@ -447,23 +447,37 @@ fn pool_status_deserializes_round_trip() {
 // ── PoolManager::acquire_with_config ─────────────────────────
 
 #[tokio::test]
-async fn acquire_with_config_returns_pooled_vm_with_user_config() {
+async fn acquire_with_config_returns_pooled_vm_when_creation_config_matches() {
     let backend: Arc<dyn ExecutionBackend> = Arc::new(MockBackend::new());
     let manager = PoolManager::new(default_pool_config(), backend, default_snapshot_cache());
 
-    // Warm pool with default config (512 MiB)
     manager.warm("alpine:latest", 1).await.unwrap();
 
-    // User requests with custom config (1024 MiB, 2 vcpus)
     let mut config = VmConfig::new("alpine:latest");
-    config.memory_mib = 1024;
-    config.vcpus = 2;
+    config.detach = true;
 
     let vm = manager.acquire_with_config(config).await.unwrap();
     assert_eq!(vm.image, "alpine:latest");
 
-    // Pool should now be empty (the warm VM was consumed)
     assert_eq!(manager.status().await.total, 0);
+}
+
+#[tokio::test]
+async fn acquire_with_config_preserves_incompatible_warm_vm_when_limits_differ() {
+    let backend: Arc<dyn ExecutionBackend> = Arc::new(MockBackend::new());
+    let manager = PoolManager::new(default_pool_config(), backend, default_snapshot_cache());
+
+    manager.warm("alpine:latest", 1).await.unwrap();
+
+    let mut config = VmConfig::new("alpine:latest");
+    config.detach = true;
+    config.process_limit = Some(256);
+    config.rootfs_extra_size_mib = Some(1024);
+
+    let vm = manager.acquire_with_config(config).await.unwrap();
+
+    assert_eq!(vm.id, "mock-vm-2");
+    assert_eq!(manager.status().await.total, 1);
 }
 
 #[tokio::test]

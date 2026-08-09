@@ -40,6 +40,15 @@ fn run() -> anyhow::Result<()> {
     /// before PID 1 powers the VM off.
     const EXIT_MARKER_GRACE_PERIOD: Duration = Duration::from_millis(100);
 
+    let mut arguments = std::env::args_os().skip(1);
+    if arguments.next().as_deref()
+        == Some(std::ffi::OsStr::new(
+            visor_init::entrypoint::WORKLOAD_LAUNCHER_ARG,
+        ))
+    {
+        return launch_workload(arguments);
+    }
+
     // Step 1: Mount essential filesystems
     visor_init::mount::mount_initial_filesystems()
         .context("failed to mount initial filesystems")?;
@@ -49,6 +58,10 @@ fn run() -> anyhow::Result<()> {
 
     // Step 3: Read configuration from kernel cmdline
     let config = visor_init::config::RunConfig::from_kernel_cmdline();
+    if let Some(limit) = config.process_limit {
+        visor_init::mount::configure_process_limit(limit)
+            .context("failed to configure process limit")?;
+    }
 
     // Step 4: Configure networking (if provided)
     let networks = config.effective_networks();
@@ -97,8 +110,8 @@ fn run() -> anyhow::Result<()> {
     // Step 9: Spawn the user's command
     write_stdout_marker(STDOUT_BEGIN_MARKER).context("write stdout begin marker")?;
     let params = visor_init::entrypoint::ExecParams::from_config(&config);
-    let child_pid =
-        visor_init::entrypoint::spawn_child(&params).context("failed to spawn child process")?;
+    let child_pid = visor_init::entrypoint::spawn_workload(&params, config.process_limit.is_some())
+        .context("failed to spawn child process")?;
 
     // Step 10: Wait for child, reaping zombies along the way
     let result = visor_init::entrypoint::wait_for_child(child_pid)
@@ -125,6 +138,18 @@ fn run() -> anyhow::Result<()> {
             std::process::exit(result.exit_code);
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+fn launch_workload(mut arguments: impl Iterator<Item = std::ffi::OsString>) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use std::os::unix::process::CommandExt as _;
+
+    let program = arguments.next().context("workload command is missing")?;
+    visor_init::mount::join_workload_cgroup().context("failed to enter workload cgroup")?;
+
+    let error = std::process::Command::new(program).args(arguments).exec();
+    Err(error).context("failed to execute workload")
 }
 
 #[cfg(target_os = "linux")]

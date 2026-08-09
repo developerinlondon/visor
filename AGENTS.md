@@ -38,10 +38,10 @@ A task is **DONE** when ALL pass:
 ## Project Context
 
 - **Name**: Visor — in-process VMM for OCI containers as microVMs
-- **Repo**: `git@gitlab.com:agentx.rs/visor.git`
+- **Repo**: `git@github.com:developerinlondon/visor.git`
 - **Binary**: `visor`
 - **Stack**: Rust stable, edition 2024, resolver 3
-- **Branch**: `dev` (feature work on `phase1/*` branches, MR to `dev`)
+- **Branch**: `main` (feature branches open pull requests to `main`)
 - **Methodology**: TDD (tests FIRST — red, green, refactor)
 - **Plans**: `docs/plans/` (12 architecture docs, 00-11)
 - **Phase**: P5 complete — Cross-platform VMM refactor done

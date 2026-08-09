@@ -3,12 +3,12 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.0.7"
+version = "0.0.8"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
-repository = "https://gitlab.com/agentx.rs/visor"
-rust-version = "1.85"
+repository = "https://github.com/developerinlondon/visor"
+rust-version = "1.97"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

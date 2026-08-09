@@ -19,7 +19,7 @@ fn docker_create_to_vm_config_basic() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, Some("mycontainer"), true);
+    let config = docker_create_to_vm_config(&req, Some("mycontainer"), true).unwrap();
     assert_eq!(config.image, "alpine:latest");
     assert_eq!(config.entrypoint, vec!["/docker-entrypoint.sh"]);
     assert_eq!(config.cmd, vec!["echo", "hello"]);
@@ -41,7 +41,7 @@ fn docker_create_to_vm_config_disables_network_for_network_mode_none() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert!(!config.network_enabled);
 }
 
@@ -59,7 +59,7 @@ fn docker_create_to_vm_config_preserves_labels() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, Some("compose-app"), true);
+    let config = docker_create_to_vm_config(&req, Some("compose-app"), true).unwrap();
     assert_eq!(
         config.labels.get("com.docker.compose.project"),
         Some(&"visor-compose".to_owned())
@@ -90,7 +90,7 @@ fn docker_create_to_vm_config_ports() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert_eq!(config.ports.len(), 1);
     assert_eq!(config.ports[0].host_port, 8080);
     assert_eq!(config.ports[0].guest_port, 80);
@@ -110,7 +110,7 @@ fn docker_create_to_vm_config_volumes() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, false);
+    let config = docker_create_to_vm_config(&req, None, false).unwrap();
     assert_eq!(config.volumes.len(), 2);
     assert_eq!(config.volumes[0].host_path, "/data");
     assert_eq!(config.volumes[0].guest_path, "/mnt/data");
@@ -131,7 +131,7 @@ fn docker_create_to_vm_config_memory() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert_eq!(config.memory_mib, 256);
 }
 
@@ -146,7 +146,7 @@ fn docker_create_to_vm_config_memory_minimum_64mib() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert_eq!(config.memory_mib, 64); // Clamped to minimum
 }
 
@@ -161,8 +161,96 @@ fn docker_create_to_vm_config_nanocpus() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert_eq!(config.vcpus, 2);
+}
+
+#[test]
+fn docker_create_to_vm_config_maps_process_limit() {
+    let req = ContainerCreateRequest {
+        image: "app".to_owned(),
+        host_config: Some(HostConfig {
+            pids_limit: Some(256),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
+    assert_eq!(config.process_limit, Some(256));
+}
+
+#[test]
+fn docker_create_to_vm_config_rejects_invalid_process_limit() {
+    let req = ContainerCreateRequest {
+        image: "app".to_owned(),
+        host_config: Some(HostConfig {
+            pids_limit: Some(-2),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let error = docker_create_to_vm_config(&req, None, true).unwrap_err();
+    assert_eq!(error, DockerConfigError::InvalidProcessLimit(-2));
+}
+
+#[test]
+fn docker_create_to_vm_config_maps_writable_layer_size() {
+    let req = ContainerCreateRequest {
+        image: "app".to_owned(),
+        host_config: Some(HostConfig {
+            storage_opt: Some(HashMap::from([("size".to_owned(), "1024m".to_owned())])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
+    assert_eq!(config.rootfs_extra_size_mib, Some(1024));
+}
+
+#[test]
+fn docker_create_to_vm_config_rejects_invalid_writable_layer_size() {
+    let req = ContainerCreateRequest {
+        image: "app".to_owned(),
+        host_config: Some(HostConfig {
+            storage_opt: Some(HashMap::from([("size".to_owned(), "many".to_owned())])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let error = docker_create_to_vm_config(&req, None, true).unwrap_err();
+    assert_eq!(
+        error,
+        DockerConfigError::InvalidStorageSize("many".to_owned())
+    );
+}
+
+#[test]
+fn docker_create_to_vm_config_rejects_oversized_writable_layer() {
+    let requested_mib = visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB + 1;
+    let req = ContainerCreateRequest {
+        image: "app".to_owned(),
+        host_config: Some(HostConfig {
+            storage_opt: Some(HashMap::from([(
+                "size".to_owned(),
+                format!("{requested_mib}m"),
+            )])),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let error = docker_create_to_vm_config(&req, None, true).unwrap_err();
+    assert_eq!(
+        error,
+        DockerConfigError::StorageSizeTooLarge {
+            requested_mib,
+            maximum_mib: visor_types::MAX_ROOTFS_EXTRA_SIZE_MIB,
+        }
+    );
 }
 
 #[test]
@@ -185,7 +273,7 @@ fn docker_create_to_vm_config_collects_service_names_and_exposed_ports() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, Some("visor-compose-api-1"), true);
+    let config = docker_create_to_vm_config(&req, Some("visor-compose-api-1"), true).unwrap();
 
     assert_eq!(config.networks, vec!["visor-compose_default".to_owned()]);
     assert_eq!(
@@ -217,7 +305,7 @@ fn docker_create_to_vm_config_falls_back_to_compose_default_network_name() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, Some("alpha-api-1"), true);
+    let config = docker_create_to_vm_config(&req, Some("alpha-api-1"), true).unwrap();
 
     assert_eq!(config.networks, vec!["alpha_default".to_owned()]);
 }
@@ -351,6 +439,31 @@ fn vm_info_to_inspect_stopped() {
     assert_eq!(resp.state.status, "exited");
     assert_eq!(resp.state.pid, 0);
     assert_eq!(resp.state.exit_code, 0);
+}
+
+#[test]
+fn vm_info_to_inspect_stopped_preserves_named_network_membership() {
+    let vm = VmInfo::new(
+        "vm-stopped-network".to_owned(),
+        "alpine".to_owned(),
+        VmState::Stopped,
+        String::new(),
+        128,
+        1,
+    );
+    let mut config = VmConfig::new("alpine");
+    config.networks = vec!["sandbox-network".to_owned()];
+
+    let resp = vm_info_to_inspect_with_config(&vm, &config);
+    let network = resp
+        .network_settings
+        .networks
+        .get("sandbox-network")
+        .expect("stopped container should retain named-network membership");
+
+    assert_eq!(network.network_i_d, "sandbox-network");
+    assert!(network.ip_address.is_empty());
+    assert!(network.gateway.is_empty());
 }
 
 #[test]
@@ -529,7 +642,7 @@ fn docker_create_empty_working_dir_stays_none() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert!(
         config.working_dir.is_none(),
         "empty working_dir should not override default (got {:?})",
@@ -545,7 +658,7 @@ fn docker_create_absent_working_dir_stays_none() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert!(config.working_dir.is_none());
 }
 
@@ -561,7 +674,7 @@ fn docker_create_memory_zero_uses_default() {
         ..Default::default()
     };
 
-    let config = docker_create_to_vm_config(&req, None, true);
+    let config = docker_create_to_vm_config(&req, None, true).unwrap();
     assert_eq!(
         config.memory_mib, 512,
         "Memory: 0 should use default 512 MiB, not {}",

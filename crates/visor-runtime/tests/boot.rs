@@ -301,6 +301,81 @@ async fn boot_vm_serial_captures_kernel_version() {
 }
 
 #[tokio::test]
+async fn boot_vm_process_limit_one_counts_only_the_workload() {
+    let tmp = boot_test_tempdir().unwrap();
+    let rootfs = tmp.path().join("rootfs.ext4");
+    build_guest_rootfs(&rootfs, &["/usr/bin/busybox"]);
+
+    let mut config = visor_init::config::RunConfig::default();
+    config.cmd = vec![
+        "/usr/bin/busybox".to_owned(),
+        "cat".to_owned(),
+        "/proc/self/cgroup".to_owned(),
+    ];
+    config.process_limit = Some(1);
+
+    let mut handle = visor_runtime::vm::boot_vm(
+        "boot-process-limit",
+        &config,
+        &rootfs,
+        visor_runtime::vm::VmBootSpec::new(256, 1, 3),
+        visor_runtime::vm::BootStorage::new(&[], &[]),
+    )
+    .expect("boot_vm should succeed");
+
+    let completion_rx = handle
+        .completion_rx
+        .take()
+        .expect("completion_rx should exist");
+    let exit_info = tokio::time::timeout(Duration::from_secs(30), completion_rx)
+        .await
+        .expect("VM boot timed out")
+        .expect("completion channel closed");
+
+    if let Some(thread) = handle.thread.take() {
+        thread.join().expect("vCPU thread panicked");
+    }
+
+    let serial = String::from_utf8_lossy(&handle.serial_output.as_bytes()).into_owned();
+    assert_eq!(exit_info.exit_code, 0, "serial output:\n{serial}");
+    let stdout = visor_runtime::vm::extract_stdout(&handle.serial_output.as_bytes());
+    assert_eq!(stdout.trim(), "0::/visor", "serial output:\n{serial}");
+
+    config.cmd = vec![
+        "/usr/bin/busybox".to_owned(),
+        "sh".to_owned(),
+        "-c".to_owned(),
+        "if /usr/bin/busybox sleep 0 & then exit 1; else exit 0; fi".to_owned(),
+    ];
+    let mut fork_handle = visor_runtime::vm::boot_vm(
+        "boot-process-limit-fork",
+        &config,
+        &rootfs,
+        visor_runtime::vm::VmBootSpec::new(256, 1, 4),
+        visor_runtime::vm::BootStorage::new(&[], &[]),
+    )
+    .expect("second boot_vm should succeed");
+    let fork_completion_rx = fork_handle
+        .completion_rx
+        .take()
+        .expect("completion_rx should exist");
+    let fork_exit_info = tokio::time::timeout(Duration::from_secs(30), fork_completion_rx)
+        .await
+        .expect("fork-limit VM boot timed out")
+        .expect("completion channel closed");
+
+    if let Some(thread) = fork_handle.thread.take() {
+        thread.join().expect("vCPU thread panicked");
+    }
+
+    let fork_serial = String::from_utf8_lossy(&fork_handle.serial_output.as_bytes()).into_owned();
+    assert_eq!(
+        fork_exit_info.exit_code, 0,
+        "the workload should observe a rejected excess process\nserial output:\n{fork_serial}"
+    );
+}
+
+#[tokio::test]
 #[serial]
 async fn boot_vm_agent_mode_accepts_vsock_ping() {
     let tmp = boot_test_tempdir().unwrap();

@@ -1240,6 +1240,157 @@ async fn container_inspect_includes_create_labels() {
 }
 
 #[tokio::test]
+async fn sandbox_service_contract_supports_limits_networking_and_lifecycle() {
+    let backend = Arc::new(MockBackend::default());
+    let app = test_router_with(Arc::clone(&backend) as Arc<dyn ExecutionBackend>);
+
+    let network_response = app
+        .clone()
+        .oneshot(
+            Request::post("/networks/create")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&serde_json::json!({
+                        "Name": "runner-bridge",
+                        "Driver": "bridge"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(network_response.status(), StatusCode::CREATED);
+
+    let id = create_container(
+        app.clone(),
+        "/containers/create?name=sandbox-contract",
+        serde_json::json!({
+            "Image": "example/sandbox-service:1.2.0",
+            "Hostname": "sandbox",
+            "User": "1000:1000",
+            "Env": [
+                "HOME=/home/user",
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Labels": {
+                "sandbox-service.managed": "true",
+                "sandbox-service.id": "sandbox-contract"
+            },
+            "HostConfig": {
+                "Memory": 536_870_912,
+                "NanoCpus": 1_000_000_000_u64,
+                "PidsLimit": 256,
+                "StorageOpt": {"size": "1024m"},
+                "RestartPolicy": {"Name": "unless-stopped"},
+                "NetworkMode": "runner-bridge",
+                "Sysctls": {
+                    "net.ipv6.conf.all.disable_ipv6": "1",
+                    "net.ipv6.conf.default.disable_ipv6": "1",
+                    "net.ipv6.conf.lo.disable_ipv6": "1"
+                }
+            },
+            "NetworkingConfig": {
+                "EndpointsConfig": {
+                    "runner-bridge": {}
+                }
+            }
+        }),
+    )
+    .await;
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/containers/{id}/start"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+    let created_configs = backend.created_configs.lock().await;
+    let config = created_configs.last().unwrap();
+    assert_eq!(config.image, "example/sandbox-service:1.2.0");
+    assert_eq!(config.memory_mib, 512);
+    assert_eq!(config.vcpus, 1);
+    assert_eq!(config.process_limit, Some(256));
+    assert_eq!(config.rootfs_extra_size_mib, Some(1024));
+    assert_eq!(config.networks, vec!["runner-bridge"]);
+    assert_eq!(
+        config.labels.get("sandbox-service.id").map(String::as_str),
+        Some("sandbox-contract")
+    );
+    drop(created_configs);
+
+    let inspect_response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/containers/{id}/json"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inspect_response.status(), StatusCode::OK);
+    let inspect_body = axum::body::to_bytes(inspect_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let inspect_json: serde_json::Value = serde_json::from_slice(&inspect_body).unwrap();
+    let link = GuestNetworkLink::for_named_network("runner-bridge", 3);
+    assert_eq!(
+        inspect_json["NetworkSettings"]["Networks"]["runner-bridge"]["IPAddress"],
+        link.guest_ip.to_string()
+    );
+    assert_eq!(
+        inspect_json["NetworkSettings"]["Networks"]["runner-bridge"]["Gateway"],
+        link.gateway_ip.to_string()
+    );
+
+    let network_response = app
+        .clone()
+        .oneshot(
+            Request::get("/networks/runner-bridge")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(network_response.status(), StatusCode::OK);
+    let network_body = axum::body::to_bytes(network_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let network_json: serde_json::Value = serde_json::from_slice(&network_body).unwrap();
+    assert_eq!(
+        network_json["IPAM"]["Config"][0]["Gateway"],
+        link.gateway_ip.to_string()
+    );
+
+    let stop_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/containers/{id}/stop?t=10"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stop_response.status(), StatusCode::NO_CONTENT);
+
+    let remove_response = app
+        .oneshot(
+            Request::delete(format!("/containers/{id}?force=true"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(remove_response.status(), StatusCode::NO_CONTENT);
+    assert!(backend.vms.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn container_inspect_not_found_returns_404() {
     let app = test_router_with(Arc::new(MockBackend::default()));
 
@@ -2677,13 +2828,17 @@ fn extract_build_context_accepts_the_directory_entries_docker_sends() {
     root.set_entry_type(tar::EntryType::Directory);
     root.set_mode(0o755);
     root.set_size(0);
-    builder.append_data(&mut root, "./", std::io::empty()).unwrap();
+    builder
+        .append_data(&mut root, "./", std::io::empty())
+        .unwrap();
 
     let mut sub = tar::Header::new_gnu();
     sub.set_entry_type(tar::EntryType::Directory);
     sub.set_mode(0o755);
     sub.set_size(0);
-    builder.append_data(&mut sub, "src/", std::io::empty()).unwrap();
+    builder
+        .append_data(&mut sub, "src/", std::io::empty())
+        .unwrap();
 
     let dockerfile = b"FROM alpine:3.20\n";
     let mut file = tar::Header::new_gnu();
