@@ -204,6 +204,17 @@ fn collect_network_names(req: &ContainerCreateRequest) -> Vec<String> {
     }
 
     if names.is_empty()
+        && let Some(network_mode) = req
+            .host_config
+            .as_ref()
+            .and_then(|host_config| host_config.network_mode.as_deref())
+            .filter(|mode| !matches!(*mode, "" | "default" | "bridge" | "host" | "none"))
+            .filter(|mode| !mode.starts_with("container:"))
+    {
+        names.insert(network_mode.to_owned());
+    }
+
+    if names.is_empty()
         && let Some(project) = req
             .labels
             .as_ref()
