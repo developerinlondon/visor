@@ -1113,6 +1113,10 @@ fn image_reference_from_query(query: &ImageCreateQuery) -> Result<String, &'stat
                 .is_some_and(|part| part.contains(':'))
         {
             Ok(from_image.to_owned())
+        } else if tag.strip_prefix("sha256:").is_some_and(|digest| {
+            digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+        }) {
+            Ok(format!("{from_image}@{tag}"))
         } else {
             Ok(format!("{from_image}:{tag}"))
         }
