@@ -1955,6 +1955,36 @@ async fn image_create_persists_image_for_inspect_and_list() {
 }
 
 #[tokio::test]
+async fn image_create_joins_sha256_tag_as_digest_reference() {
+    const DIGEST: &str =
+        "sha256:49fd873a87c8b2284126868420b64cdd52d16a49c0d9b3ea91c03a37a45df69d";
+    const EXPECTED_REFERENCE: &str = concat!(
+        "docker.io/n8nio/n8n-sandbox-service-sandbox@",
+        "sha256:49fd873a87c8b2284126868420b64cdd52d16a49c0d9b3ea91c03a37a45df69d"
+    );
+
+    let backend: Arc<dyn ExecutionBackend> = Arc::new(MockBackend::default());
+    let image_manager = Arc::new(MockImageManager::default());
+    let app = test_router_with_image_manager(backend, image_manager.clone());
+    let uri = format!(
+        "/v1.45/images/create?fromImage=docker.io%2Fn8nio%2Fn8n-sandbox-service-sandbox&tag={}",
+        DIGEST.replace(':', "%3A")
+    );
+
+    let response = app
+        .oneshot(Request::post(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let image = image_manager
+        .inspect_image(EXPECTED_REFERENCE)
+        .await
+        .unwrap();
+    assert_eq!(image.repo_tags, vec![EXPECTED_REFERENCE]);
+}
+
+#[tokio::test]
 async fn network_list_returns_empty_array() {
     let app = test_router_with(Arc::new(MockBackend::default()));
 
