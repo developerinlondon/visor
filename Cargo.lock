@@ -4731,6 +4731,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "visor-types",
  "vm-fdt",
  "vmm-sys-util",
  "vmnet",

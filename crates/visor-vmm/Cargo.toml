@@ -19,6 +19,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 tracing = { workspace = true }
+visor-types = { path = "../visor-types" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 applevisor = { workspace = true }

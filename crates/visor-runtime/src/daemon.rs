@@ -80,6 +80,9 @@ impl visor_docker::ServiceDiscovery for DockerDnsServiceDiscovery {
 ///
 /// Returns an error if the server fails to bind or encounters a fatal error.
 pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
+    visor_types::configure_named_network_supernet_from_env()
+        .context("configure named network supernet")?;
+
     // 1. Initialize tracing subscriber
     init_tracing();
     // 1a. On macOS, verify the binary has the HVF entitlement before doing

@@ -38,6 +38,12 @@ fn default_protocol() -> String {
 /// Default first guest CID assigned by the runtime.
 pub const FIRST_GUEST_CID: u32 = 3;
 
+/// Environment variable that selects the address range for named guest networks.
+pub const NAMED_NETWORK_SUPERNET_ENV: &str = "VISOR_NAMED_NETWORK_SUPERNET";
+
+/// Backward-compatible address range used when no named-network override is set.
+pub const DEFAULT_NAMED_NETWORK_SUPERNET: &str = "100.64.0.0/10";
+
 /// Maximum writable rootfs headroom accepted for one VM, in MiB (1 TiB).
 pub const MAX_ROOTFS_EXTRA_SIZE_MIB: u64 = 1024 * 1024;
 
@@ -287,6 +293,125 @@ impl VolumeMount {
     }
 }
 
+/// Address range used to derive deterministic `/24` named guest networks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NamedNetworkSupernet {
+    base: u32,
+    prefix: u8,
+}
+
+impl NamedNetworkSupernet {
+    /// Parse an aligned IPv4 supernet between `/8` and `/24`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the CIDR is invalid, unaligned, or cannot contain
+    /// deterministic `/24` guest networks.
+    pub fn parse(cidr: &str) -> anyhow::Result<Self> {
+        let Some((address, prefix)) = cidr.split_once('/') else {
+            anyhow::bail!("named network supernet must be an IPv4 CIDR");
+        };
+        let address = address
+            .parse::<std::net::Ipv4Addr>()
+            .map_err(|error| anyhow::anyhow!("invalid named network supernet address: {error}"))?;
+        let prefix = prefix
+            .parse::<u8>()
+            .map_err(|error| anyhow::anyhow!("invalid named network supernet prefix: {error}"))?;
+        if !(8..=24).contains(&prefix) {
+            anyhow::bail!("named network supernet prefix must be between /8 and /24");
+        }
+
+        let base = u32::from(address);
+        let mask = u32::MAX << (32 - prefix);
+        if base & mask != base {
+            anyhow::bail!("named network supernet must be aligned to its prefix");
+        }
+
+        Ok(Self { base, prefix })
+    }
+
+    /// Return this supernet in CIDR notation.
+    #[must_use]
+    pub fn cidr(self) -> String {
+        format!("{}/{}", std::net::Ipv4Addr::from(self.base), self.prefix)
+    }
+
+    /// Derive a deterministic shared-network link within this supernet.
+    #[must_use]
+    pub fn link_for_named_network(self, network_name: &str, cid: u32) -> GuestNetworkLink {
+        let hash = fnv1a64(network_name.as_bytes());
+        let subnet_bits = 24 - self.prefix;
+        let subnet_mask = (1_u32 << subnet_bits) - 1;
+        let hash_bytes = hash.to_le_bytes();
+        let subnet_index =
+            u32::from(u16::from_le_bytes([hash_bytes[0], hash_bytes[1]])) & subnet_mask;
+        let subnet_base = self.base + (subnet_index << 8);
+        let host_octet = 2_u32.saturating_add(cid.saturating_sub(FIRST_GUEST_CID) % 253);
+
+        GuestNetworkLink {
+            guest_ip: std::net::Ipv4Addr::from(subnet_base + host_octet),
+            gateway_ip: std::net::Ipv4Addr::from(subnet_base + 1),
+            netmask: std::net::Ipv4Addr::new(255, 255, 255, 0),
+        }
+    }
+}
+
+impl Default for NamedNetworkSupernet {
+    fn default() -> Self {
+        Self {
+            base: u32::from(std::net::Ipv4Addr::new(100, 64, 0, 0)),
+            prefix: 10,
+        }
+    }
+}
+
+static NAMED_NETWORK_SUPERNET: std::sync::OnceLock<NamedNetworkSupernet> =
+    std::sync::OnceLock::new();
+
+/// Configure the process-wide named-network supernet from the environment.
+///
+/// # Errors
+///
+/// Returns an error when the environment value is not valid UTF-8, is not a
+/// supported CIDR, or conflicts with a value already used by this process.
+pub fn configure_named_network_supernet_from_env() -> anyhow::Result<()> {
+    let cidr = match std::env::var(NAMED_NETWORK_SUPERNET_ENV) {
+        Ok(cidr) => cidr,
+        Err(std::env::VarError::NotPresent) => DEFAULT_NAMED_NETWORK_SUPERNET.to_owned(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            anyhow::bail!("{NAMED_NETWORK_SUPERNET_ENV} must be valid UTF-8");
+        }
+    };
+    let configured = NamedNetworkSupernet::parse(&cidr)?;
+
+    if let Some(current) = NAMED_NETWORK_SUPERNET.get() {
+        if *current == configured {
+            return Ok(());
+        }
+        anyhow::bail!("named network supernet is already configured as {}", current.cidr());
+    }
+
+    NAMED_NETWORK_SUPERNET
+        .set(configured)
+        .map_err(|_| anyhow::anyhow!("named network supernet was configured concurrently"))
+}
+
+/// Return the configured named-network supernet.
+///
+/// # Panics
+///
+/// Panics when the environment override is invalid and startup validation has
+/// not already rejected it.
+#[must_use]
+pub fn named_network_supernet() -> NamedNetworkSupernet {
+    *NAMED_NETWORK_SUPERNET.get_or_init(|| {
+        let cidr = std::env::var(NAMED_NETWORK_SUPERNET_ENV)
+            .unwrap_or_else(|_| DEFAULT_NAMED_NETWORK_SUPERNET.to_owned());
+        NamedNetworkSupernet::parse(&cidr)
+            .unwrap_or_else(|error| panic!("invalid {NAMED_NETWORK_SUPERNET_ENV}: {error}"))
+    })
+}
+
 /// Deterministic point-to-point guest network allocation for a VM CID.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -320,16 +445,7 @@ impl GuestNetworkLink {
     /// to the active guest CID.
     #[must_use]
     pub fn for_named_network(network_name: &str, cid: u32) -> Self {
-        let hash = fnv1a64(network_name.as_bytes());
-        let second_octet = 64_u8.saturating_add(((hash >> 8) & 0x3f) as u8);
-        let third_octet = (hash & 0xff) as u8;
-        let host_octet = 2_u8.saturating_add((cid.saturating_sub(FIRST_GUEST_CID) % 253) as u8);
-
-        Self {
-            guest_ip: std::net::Ipv4Addr::new(100, second_octet, third_octet, host_octet),
-            gateway_ip: std::net::Ipv4Addr::new(100, second_octet, third_octet, 1),
-            netmask: std::net::Ipv4Addr::new(255, 255, 255, 0),
-        }
+        named_network_supernet().link_for_named_network(network_name, cid)
     }
 }
 

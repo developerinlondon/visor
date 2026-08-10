@@ -23,7 +23,6 @@ use super::backend::{
 };
 
 const VISOR_GUEST_SUPERNET: &str = "172.20.0.0/16";
-const VISOR_SHARED_GUEST_SUPERNET: &str = "100.64.0.0/10";
 const VISOR_IPTABLES_TAG_PREFIX: &str = "visor-";
 const VISOR_IPTABLES_TABLES: &[&str] = &["nat", "filter"];
 const DOCKER_USER_CHAIN: &str = "DOCKER-USER";
@@ -694,7 +693,11 @@ fn generate_nat_rules(config: &NatConfig) -> Vec<IptablesRule> {
     ]
 }
 
-fn generate_shared_nat_rules(interface: &str, subnet: &str) -> Vec<IptablesRule> {
+fn generate_shared_nat_rules(
+    interface: &str,
+    subnet: &str,
+    shared_supernet: &str,
+) -> Vec<IptablesRule> {
     let comment = format!("visor-sharednat-{interface}");
     vec![
         IptablesRule {
@@ -740,7 +743,7 @@ fn generate_shared_nat_rules(interface: &str, subnet: &str) -> Vec<IptablesRule>
                 "-i".to_owned(),
                 interface.to_owned(),
                 "-d".to_owned(),
-                VISOR_SHARED_GUEST_SUPERNET.to_owned(),
+                shared_supernet.to_owned(),
                 "-j".to_owned(),
                 "DROP".to_owned(),
                 "-m".to_owned(),
@@ -1061,7 +1064,8 @@ fn bridge_has_member_interfaces(name: &str) -> Result<bool, NetError> {
 
 pub(crate) fn ensure_shared_bridge_nat(interface: &str, subnet: &str) -> Result<(), NetError> {
     ensure_docker_user_chain()?;
-    let desired_rules = generate_shared_nat_rules(interface, subnet);
+    let shared_supernet = visor_types::named_network_supernet().cidr();
+    let desired_rules = generate_shared_nat_rules(interface, subnet, &shared_supernet);
     let comment_prefix = format!("visor-sharednat-{interface}");
     let existing_rules = list_visor_iptables_rules_with_comment(&comment_prefix)?;
 

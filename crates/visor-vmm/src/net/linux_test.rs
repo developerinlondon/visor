@@ -162,7 +162,8 @@ fn route_localnet_sysctl_path_points_to_interface_setting() {
 
 #[test]
 fn shared_nat_rules_allow_same_bridge_subnet_before_supernet_drop() {
-    let rules = generate_shared_nat_rules("vsrbr1234", "100.70.1.0/24");
+    let rules =
+        generate_shared_nat_rules("vsrbr1234", "10.200.243.0/24", "10.200.0.0/16");
 
     let allow_same_subnet = rules
         .iter()
@@ -172,7 +173,7 @@ fn shared_nat_rules_allow_same_bridge_subnet_before_supernet_drop() {
                 && rule.args.iter().any(|arg| arg == "-i")
                 && rule.args.iter().any(|arg| arg == "vsrbr1234")
                 && rule.args.iter().any(|arg| arg == "-d")
-                && rule.args.iter().any(|arg| arg == "100.70.1.0/24")
+                && rule.args.iter().any(|arg| arg == "10.200.243.0/24")
                 && rule.args.iter().any(|arg| arg == "ACCEPT")
         })
         .expect("shared bridge should allow traffic within its own subnet");
@@ -185,10 +186,7 @@ fn shared_nat_rules_allow_same_bridge_subnet_before_supernet_drop() {
                 && rule.args.iter().any(|arg| arg == "-i")
                 && rule.args.iter().any(|arg| arg == "vsrbr1234")
                 && rule.args.iter().any(|arg| arg == "-d")
-                && rule
-                    .args
-                    .iter()
-                    .any(|arg| arg == VISOR_SHARED_GUEST_SUPERNET)
+                && rule.args.iter().any(|arg| arg == "10.200.0.0/16")
                 && rule.args.iter().any(|arg| arg == "DROP")
         })
         .expect("shared bridge should drop traffic to other shared-network subnets");
@@ -210,14 +208,15 @@ fn shared_nat_rules_allow_same_bridge_subnet_before_supernet_drop() {
 
 #[test]
 fn shared_nat_rules_refresh_when_stale_drop_precedes_same_subnet_allow() {
-    let desired = generate_shared_nat_rules("vsrbr1234", "100.70.1.0/24");
+    let desired =
+        generate_shared_nat_rules("vsrbr1234", "10.200.243.0/24", "10.200.0.0/16");
     let allow_index = desired
         .iter()
         .position(|rule| {
             rule.table == "filter"
                 && rule.args.iter().any(|arg| arg == "FORWARD")
                 && rule.args.iter().any(|arg| arg == "-d")
-                && rule.args.iter().any(|arg| arg == "100.70.1.0/24")
+                && rule.args.iter().any(|arg| arg == "10.200.243.0/24")
                 && rule.args.iter().any(|arg| arg == "ACCEPT")
         })
         .expect("same-subnet allow rule should be present");

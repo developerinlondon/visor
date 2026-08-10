@@ -62,6 +62,20 @@ VISOR_KERNEL_URL=https://example.invalid/downloads cargo build --release
 `VISOR_KERNEL_NO_BUILD=1` makes the build fail rather than compile a kernel, which is usually
 what you want in CI that has an artifact to fetch.
 
+## Named network address space
+
+Docker and Compose named networks use deterministic `/24` guest subnets. They default to
+`100.64.0.0/10` for backward compatibility. Hosts that use that range for a VPN such as
+Tailscale must select a non-overlapping aligned IPv4 supernet between `/8` and `/24` before
+starting the daemon:
+
+```sh
+VISOR_NAMED_NETWORK_SUPERNET=10.200.0.0/16 visor start
+```
+
+Visor derives both guest addresses and its isolation rules from the same value. Check the host's
+routes, container networks, and VPN ranges before choosing an override.
+
 ## Layout
 
 | Crate           | What it is                                                   |
