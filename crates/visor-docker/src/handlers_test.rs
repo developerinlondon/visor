@@ -474,6 +474,75 @@ async fn container_create_defers_backend_boot_until_start() {
 }
 
 #[tokio::test]
+async fn managed_container_accepts_unique_id_prefix() {
+    let backend = Arc::new(MockBackend::default());
+    let app = test_router_with(Arc::clone(&backend) as Arc<dyn ExecutionBackend>);
+    let id = create_container(
+        app.clone(),
+        "/containers/create",
+        serde_json::json!({"Image": "alpine:latest"}),
+    )
+    .await;
+    let prefix = &id[..12];
+
+    let start_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/containers/{prefix}/start"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(start_response.status(), StatusCode::NO_CONTENT);
+
+    let inspect_response = app
+        .clone()
+        .oneshot(
+            Request::get(format!("/containers/{prefix}/json"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(inspect_response.status(), StatusCode::OK);
+
+    let exec_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/containers/{prefix}/exec"))
+                .header("Content-Type", "application/json")
+                .body(Body::from(r#"{"Cmd":["true"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(exec_response.status(), StatusCode::CREATED);
+
+    let stop_response = app
+        .clone()
+        .oneshot(
+            Request::post(format!("/containers/{prefix}/stop"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(stop_response.status(), StatusCode::NO_CONTENT);
+
+    let remove_response = app
+        .oneshot(
+            Request::delete(format!("/containers/{prefix}?force=true"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(remove_response.status(), StatusCode::NO_CONTENT);
+    assert!(backend.vms.lock().await.is_empty());
+}
+
+#[tokio::test]
 async fn container_create_registers_service_names_with_guest_ip() {
     let backend = Arc::new(MockBackend::default());
     let service_discovery = Arc::new(MockServiceDiscovery::default());
