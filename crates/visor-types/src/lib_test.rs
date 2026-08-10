@@ -61,6 +61,24 @@ fn guest_network_link_for_named_network_changes_subnet_by_network() {
 }
 
 #[test]
+fn named_network_supernet_maps_names_into_configured_range() {
+    let supernet = NamedNetworkSupernet::parse("10.200.0.0/16").unwrap();
+    let link = supernet.link_for_named_network("runner-bridge", 3);
+
+    assert_eq!(supernet.cidr(), "10.200.0.0/16");
+    assert_eq!(link.guest_ip, std::net::Ipv4Addr::new(10, 200, 243, 2));
+    assert_eq!(link.gateway_ip, std::net::Ipv4Addr::new(10, 200, 243, 1));
+    assert_eq!(link.netmask, std::net::Ipv4Addr::new(255, 255, 255, 0));
+}
+
+#[test]
+fn named_network_supernet_rejects_ranges_smaller_than_one_ipv4_subnet() {
+    let error = NamedNetworkSupernet::parse("10.200.0.0/25").unwrap_err();
+
+    assert!(error.to_string().contains("prefix must be between /8 and /24"));
+}
+
+#[test]
 fn vm_state_default_is_creating() {
     assert_eq!(VmState::default(), VmState::Creating);
 }
