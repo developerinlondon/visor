@@ -1038,9 +1038,21 @@ async fn resolve_managed_container_id(state: &DockerState, id: &str) -> Option<S
         return Some(id.to_owned());
     }
 
-    containers.iter().find_map(|(container_id, record)| {
+    if let Some(container_id) = containers.iter().find_map(|(container_id, record)| {
         (record.config.name.as_deref() == Some(id)).then(|| container_id.clone())
-    })
+    }) {
+        return Some(container_id);
+    }
+
+    if id.is_empty() {
+        return None;
+    }
+
+    let mut prefix_matches = containers
+        .keys()
+        .filter(|container_id| container_id.starts_with(id));
+    let matched_id = prefix_matches.next()?.clone();
+    prefix_matches.next().is_none().then_some(matched_id)
 }
 
 async fn load_managed_container_record(
